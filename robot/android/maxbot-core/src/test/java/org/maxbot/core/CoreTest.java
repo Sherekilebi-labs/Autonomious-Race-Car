@@ -202,7 +202,7 @@ public final class CoreTest {
         manualOnly.manual(0, -255, true, reversed) && manualOnly.tick(reversed).pwm == -255,
         "reverse allowed after neutral dwell");
     check(
-        manualOnly.tick(reversed + 101_000_000L).pwm == 0,
+        manualOnly.tick(reversed + 301_000_000L).pwm == 0,
         "manual command expires without held deadman");
     check(!manualOnly.startScout(reversed), "manual-ready configuration never authorizes autonomy");
     manualPower.power.batteryMonitoring = true;
@@ -247,7 +247,23 @@ public final class CoreTest {
     check(
         percentiles[0] == 50 && percentiles[1] == 95 && percentiles[2] == 99,
         "bounded latency percentiles");
+    Calibration faultConfig=calibrated();faultConfig.power.batteryMonitoring=false;
+    RunSupervisor faultStatus=new RunSupervisor(faultConfig,fake);faultStatus.link(true);faultStatus.heartbeat(now);
+    faultStatus.telemetry(0,0,now,false,"ABSOLUTE_EXPIRY");
+    check(!faultStatus.manual(0,80,true,now),"ESP fault prevents manual input");
+    check(faultStatus.fault().equals("ESP32: ABSOLUTE_EXPIRY"),"manual attempt cannot hide ESP fault behind generic arm prompt");
+    Calibration simpleConfig=calibrated();simpleConfig.power.batteryMonitoring=false;
+    simpleConfig.camera=new Calibration.Camera();simpleConfig.commissioning=new Calibration.Commissioning();
+    simpleConfig.limits.commandTtlMs=0;simpleConfig.limits.watchdogMs=0;
+    check(simpleConfig.manualMissing().isEmpty(),"manual control does not validate autonomous timing/calibration fields");
+    RunSupervisor simple=new RunSupervisor(simpleConfig,fake);simple.link(true);simple.heartbeat(now);simple.telemetry(0,0,now,true,"");
+    check(simple.manual(8,120,true,now),"simple manual input accepted without camera or autonomy readiness");
+    check(simple.tick(now+200_000_000L).pwm==120,"200 ms Wi-Fi gap stays within manual 300 ms freshness window");
+    check(simple.tick(now+301_000_000L).pwm==0,"manual timeout neutralizes at 300 ms");
+    check(simple.manual(8,120,true,now+320_000_000L),"fresh manual input resumes after neutral without reset");
+    check(!simple.manual(8,120,true,now,now+301_000_000L),"manual deadline cannot exceed 300 ms");
     AutonomyTest.run();
+    ClockSyncTest.run();
     System.out.println("PASS " + checks + " core checks");
   }
 }

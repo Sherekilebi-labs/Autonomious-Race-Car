@@ -49,7 +49,7 @@ public final class MaxBotActivity extends Activity {
   private final ExecutorService inference =
       Executors.newSingleThreadExecutor(r -> new Thread(r, "maxbot-inference"));
   private final ScheduledExecutorService control =
-      Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "maxbot-control"));
+      Executors.newSingleThreadScheduledExecutor(r -> new Thread(()->{android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_MORE_FAVORABLE);r.run();}, "maxbot-control"));
   private final ExecutorService files = Executors.newSingleThreadExecutor();
   private final AtomicBoolean inferenceScheduled = new AtomicBoolean();
   private volatile boolean active, closing, gpu = true, collection, thermalLimited,videoEnabled=true;
@@ -58,7 +58,11 @@ public final class MaxBotActivity extends Activity {
       cameraStatus = "Waiting for tracking";
   private volatile JSONObject telemetry = new JSONObject();
   private volatile List<ConeDetector.Detection> detections = java.util.Collections.emptyList();
-  private long lastStatusNs;
+  private final ScheduledExecutorService statusPublisher = Executors.newSingleThreadScheduledExecutor(r -> new Thread(r,"maxbot-status"));
+  private volatile long lastControlNs,maximumControlGapNs;
+  private volatile RunSupervisor.Output lastOutput = new RunSupervisor.Output("STOP",0,0);
+  private android.net.wifi.WifiManager.WifiLock wifiLatencyLock;
+  private volatile String wifiLatencyStatus="inactive";
   private long nextControlNs,lastRecordedFinish;
 
   private volatile long latestDetectionNs;
@@ -79,7 +83,7 @@ public final class MaxBotActivity extends Activity {
     policy=new SlalomPolicy(new SlalomPolicy.Parameters());
     supervisor=new RunSupervisor(calibration,policy);
     LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setPadding(24,24,24,24);layout.setBackgroundColor(Color.rgb(247,249,251));
-    layout.addView(text("MaxBot · status",26));
+    layout.addView(text("MaxBot · manual control",26));
     status=text("Starting services · disarmed",18);parameters=text("",14);
     layout.addView(status);layout.addView(parameters);
     // Keep a live GL surface for ARCore while presenting status indicators only.
@@ -122,6 +126,7 @@ public final class MaxBotActivity extends Activity {
     power.addThermalStatusListener(thermalListener);
     nextControlNs = SystemClock.elapsedRealtimeNanos();
     control.schedule(this::tick, 0, TimeUnit.NANOSECONDS);
+    statusPublisher.scheduleWithFixedDelay(this::publishStatus,0,100,TimeUnit.MILLISECONDS);
     try{artifacts=new ArtifactManager(getFilesDir(),this::prepareArtifacts);inference.execute(()->{try{artifacts.restore();}catch(Exception e){modelStatus="Artifact restore blocked: "+e.getMessage();}});}catch(Exception e){modelStatus="Artifact storage unavailable";}
     connect();
   }
@@ -184,7 +189,10 @@ public final class MaxBotActivity extends Activity {
       message("Connect the ESP32 first");
       return;
     }
-    supervisor.stop("Manual commissioning: verify direction and stop response with wheels raised");
+    if(!telemetry.optString("fault").isEmpty()||telemetry.optBoolean("estop")){
+      message("ESP32: "+telemetry.optString("fault","stop latched")+". Use Stop / disarm, then Reset stop before arming.");return;
+    }
+    supervisor.stop("Manual control: waiting for arm acknowledgement");
     vehicle.special("ARM_MANUAL");
   }
 
@@ -211,7 +219,7 @@ public final class MaxBotActivity extends Activity {
 
               public void telemetry(JSONObject m, long now) {
                 if(!"telemetry".equals(m.optString("type"))){if(recorder!=null)recorder.event(m);return;}
-                if(recorder!=null)try{recorder.event(new JSONObject(m.toString()).put("type","actuator_telemetry").put("phone_received_ns",Long.toString(now)));}catch(Exception ignored){}
+                if(recorder!=null)recorder.actuator(m,now);
                 steeringDeg = m.optInt("steering_mdeg") / 1000.;
                 voltage = calibration.power.batteryMonitoring ? m.optInt("battery_mv") / 1000. : 0;
                 telemetry = m;
@@ -290,7 +298,7 @@ public final class MaxBotActivity extends Activity {
             if (calibration.missing().isEmpty() && vehicle != null) vehicle.special("ARM");
             break;
           case "arm_manual":
-            runOnUiThread(this::armManual);
+            armManual();
             break;
           case "scout":
             supervisor.startScout(now);if(recorder!=null)recorder.snapshot("manifest.json",sessionManifest());
@@ -396,6 +404,9 @@ public final class MaxBotActivity extends Activity {
       RunSupervisor.Output out =
           active ? supervisor.tick(now) : new RunSupervisor.Output("DISARM", 0, 0);
       if (vehicle != null) vehicle.send(out);
+      lastOutput=out;
+      if(lastControlNs!=0)maximumControlGapNs=Math.max(maximumControlGapNs,now-lastControlNs);
+      lastControlNs=now;
 
       JSONObject event =
           new JSONObject()
@@ -412,16 +423,42 @@ public final class MaxBotActivity extends Activity {
         recorder.event(event);
         if(supervisor.finishNs()>0&&supervisor.finishNs()!=lastRecordedFinish){lastRecordedFinish=supervisor.finishNs();recorder.event(new JSONObject().put("type","finish_crossing").put("time_ns",Long.toString(lastRecordedFinish)).put("reference_id",supervisor.referenceId()).put("contact_verdict","requires_operator_review").put("time_method","timestamped-pose interpolation; <=5mm/0.01rad subdivision, plus empirical pose uncertainty"));}
       }
-      if (now - lastStatusNs < 100_000_000L) return;
-      lastStatusNs = now;
+    } catch (Exception e) {
+      supervisor.stop("Control pipeline exception");
+      if (vehicle != null) vehicle.special("STOP");
+    } finally {
+      long now = SystemClock.elapsedRealtimeNanos();
+      nextControlNs += 20_000_000L;
+      if (nextControlNs < now) {
+        if (moving()) supervisor.stop("Control deadline missed");
+        nextControlNs = now + 20_000_000L;
+      }
+      if (!closing)
+        control.schedule(this::tick, Math.max(0, nextControlNs - now), TimeUnit.NANOSECONDS);
+    }
+  }
+
+  private void publishStatus() {
+    if(closing)return;
+    try {
+      long now=SystemClock.elapsedRealtimeNanos();
+      RunSupervisor.Output out=lastOutput;
+      Geometry.Pose pose=supervisor.pose();
       JSONObject status =
           new JSONObject()
               .put("type", "telemetry")
+              .put("wifi_latency_mode",wifiLatencyStatus)
+              .put("control_age_ms",lastControlNs==0?JSONObject.NULL:Math.max(0,(now-lastControlNs)/1_000_000.0))
+              .put("control_max_gap_ms",maximumControlGapNs/1_000_000.0)
+              .put("dashboard_control",dashboard==null?JSONObject.NULL:dashboard.controlTiming())
               .put("time_ns",Long.toString(now))
               .put("mode", supervisor.mode().name())
               .put("fault", supervisor.fault())
               .put("calibrated", calibration.missing().isEmpty())
               .put("manual_ready", calibration.manualMissing().isEmpty())
+              .put("manual_input_ms",ManualControl.INPUT_MS).put("manual_link_ms",ManualControl.LINK_MS)
+              .put("vehicle_connected",vehicle!=null&&vehicle.connected())
+              .put("mcu_fault",telemetry.optString("fault"))
               .put("manual_missing", new JSONArray(calibration.manualMissing()))
               .put("manual_armed", telemetry.optBoolean("manual_armed"))
               .put("manual_max_pwm", calibration.manual.maxPwm)
@@ -442,6 +479,7 @@ public final class MaxBotActivity extends Activity {
                   calibration.power.batteryMonitoring && voltage > 0 ? voltage : JSONObject.NULL)
               .put("battery_percent", JSONObject.NULL)
               .put("pwm", out.pwm)
+              .put("mcu_pwm",telemetry.has("pwm")?telemetry.optInt("pwm"):JSONObject.NULL)
               .put("passed", supervisor.passed())
               .put("inference_ms",Double.isFinite(lastInferenceMs)?lastInferenceMs:JSONObject.NULL)
               .put("frame_age_ms",Double.isFinite(frameAgeMs)?frameAgeMs:JSONObject.NULL)
@@ -460,7 +498,7 @@ public final class MaxBotActivity extends Activity {
       CourseMap liveMap=supervisor.map();
       status.put("map_epoch",liveMap==null?JSONObject.NULL:liveMap.mapEpoch()).put("config_id",activeConfigId).put("model_id",activeModelId).put("vehicle_model_id",dynamicsId).put("policy_id","cone_slalom_v1").put("calibration_id",calibration.firmwareCalibrationId);
       status.put("capabilities",new JSONArray(new String[]{"cone_slalom_v1","yolov5_xywh_objectness","end_to_end_xyxy_score_class","artifacts_v1","reference_v1"}));
-      if(camera!=null)status.put("camera_capabilities",camera.capabilities);
+      if(camera!=null)status.put("camera_capabilities",new JSONObject(camera.capabilities.toString()));
       if(liveMap!=null){
         JSONObject course=mapJson(liveMap);status.put("course_map",course);
         JSONObject config=new JSONObject(gson.toJson(calibration));config.remove("network");
@@ -469,6 +507,7 @@ public final class MaxBotActivity extends Activity {
       }
       status.put("capture_pwm_ms",JSONObject.NULL).put("capture_latency_status","Unavailable: exposure clock mapping not validated");
       if(vehicle!=null){
+        status.put("vehicle_control",vehicle.controlStatus());
         status.put("steering_onset_ms",percentiles(vehicle.steeringTiming.onset())).put("steering_settling_ms",percentiles(vehicle.steeringTiming.settling())).put("steering_onset_samples",vehicle.steeringTiming.onsetSamples()).put("steering_settling_samples",vehicle.steeringTiming.settlingSamples()).put("steering_censored",vehicle.steeringTiming.censored()).put("steering_timing_definition","ESP potentiometer: >=7 deg target step; onset >=1 deg; settling within 3.5 deg held 100 ms; gaps >60 ms censor");
         status.put("clock_uncertainty_ms",Double.isFinite(vehicle.clockUncertaintyMs())?vehicle.clockUncertaintyMs():JSONObject.NULL);
         status.put("timing_window_samples",vehicle.timing.windowSamples()).put("image_timing_samples",vehicle.timing.imageSamples()).put("timing_window_ms",finite(vehicle.timing.windowMs())).put("timing_application_age_ms",finite(vehicle.timing.applicationAgeMs(now))).put("image_timing_age_ms",finite(vehicle.timing.imageAgeMs(now)));
@@ -525,8 +564,7 @@ public final class MaxBotActivity extends Activity {
                     + "\n"
                     + cameraStatus
                     + "\n"
-                    + modelStatus
-                    + "\n"
+                    + (supervisor.autonomous()?modelStatus+"\n":"")
                     + supervisor.fault());
             parameters.setText(
                 "Speed: "
@@ -541,34 +579,40 @@ public final class MaxBotActivity extends Activity {
                         : "Not monitored; check before each run")
                     + "\nInference: "
                     + Math.round(lastInferenceMs)
-                    + " ms\nManual commissioning: "
+                    + " ms\nManual control: "
                     + (calibration.manualMissing().isEmpty()
-                        ? "Ready; use Mac deadman control"
+                        ? "Ready; arm on Mac, then use WASD"
                         : String.join(", ", calibration.manualMissing()))
                     + "\nStop behavior: "
                     + (calibration.hardware.driveBrakeVerified
                         ? "Verified brake"
                         : "Coast; braking unverified")
-                    + "\nAutonomy calibration: "
-                    + String.join(", ", calibration.missing()));
+                    + (supervisor.autonomous()?"\nAutonomy calibration: "+String.join(", ", calibration.missing()):""));
           });
-    } catch (Exception e) {
-      supervisor.stop("Control pipeline exception");
-      if (vehicle != null) vehicle.special("STOP");
-    } finally {
-      long now = SystemClock.elapsedRealtimeNanos();
-      nextControlNs += 20_000_000L;
-      if (nextControlNs < now) {
-        if (moving()) supervisor.stop("Control deadline missed");
-        nextControlNs = now + 20_000_000L;
-      }
-      if (!closing)
-        control.schedule(this::tick, Math.max(0, nextControlNs - now), TimeUnit.NANOSECONDS);
+    } catch(Exception e) {
+      android.util.Log.w("MaxBotStatus","Status publication failed",e);
     }
   }
 
+  private void acquireLowLatencyWifi() {
+    if(!"wifi".equals(calibration.network.transport))return;
+    try {
+      if(wifiLatencyLock==null){
+        android.net.wifi.WifiManager manager=(android.net.wifi.WifiManager)getApplicationContext().getSystemService(WIFI_SERVICE);
+        wifiLatencyLock=manager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY,"MaxBot:control");
+        wifiLatencyLock.setReferenceCounted(false);
+      }
+      if(!wifiLatencyLock.isHeld())wifiLatencyLock.acquire();
+      wifiLatencyStatus=wifiLatencyLock.isHeld()?"foreground low-latency lock held":"unavailable";
+    } catch(Exception e){wifiLatencyStatus="unavailable: "+e.getClass().getSimpleName();android.util.Log.w("MaxBotWifi","Low-latency Wi-Fi request failed",e);}
+  }
+  private void releaseLowLatencyWifi() {
+    try{if(wifiLatencyLock!=null&&wifiLatencyLock.isHeld())wifiLatencyLock.release();}catch(Exception e){android.util.Log.w("MaxBotWifi","Wi-Fi lock release failed",e);}
+    wifiLatencyStatus="inactive";
+  }
+
   private JSONObject sessionManifest(){
-    JSONObject m=new JSONObject();try{m.put("schemaVersion",1).put("artifactType","recording_session").put("appVersion","0.3.0-task1").put("calibrationId",calibration.firmwareCalibrationId).put("geometryId",calibration.geometryId).put("policyId","cone_slalom_v1").put("modelId",activeModelId).put("vehicleModelId",dynamicsId).put("configRevision",activeConfigId).put("physicallyValidated",false).put("contactReview","required").put("mapEpoch",supervisor.map()==null?JSONObject.NULL:supervisor.map().mapEpoch()).put("referenceId",supervisor.referenceId()).put("cameraStreamId",camera==null?JSONObject.NULL:camera.streamId);}catch(Exception ignored){}return m;
+    JSONObject m=new JSONObject();try{m.put("schemaVersion",1).put("artifactType","recording_session").put("appVersion","0.4.0-manual").put("calibrationId",calibration.firmwareCalibrationId).put("geometryId",calibration.geometryId).put("policyId","cone_slalom_v1").put("modelId",activeModelId).put("vehicleModelId",dynamicsId).put("configRevision",activeConfigId).put("physicallyValidated",false).put("contactReview","required").put("mapEpoch",supervisor.map()==null?JSONObject.NULL:supervisor.map().mapEpoch()).put("referenceId",supervisor.referenceId()).put("cameraStreamId",camera==null?JSONObject.NULL:camera.streamId);}catch(Exception ignored){}return m;
   }
 
   private void exportRun()throws Exception{
@@ -668,6 +712,7 @@ public final class MaxBotActivity extends Activity {
   protected void onResume() {
     super.onResume();
     active = true;
+    acquireLowLatencyWifi();
     if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)
       requestPermissions(new String[] {Manifest.permission.CAMERA}, CAMERA_PERMISSION);
     else if (camera != null) camera.resume();
@@ -684,6 +729,7 @@ public final class MaxBotActivity extends Activity {
   @Override
   protected void onPause() {
     active = false;
+    releaseLowLatencyWifi();
     supervisor.stop("App left foreground");
     if (vehicle != null) vehicle.special("DISARM");
     if (camera != null) camera.pause();
@@ -695,6 +741,8 @@ public final class MaxBotActivity extends Activity {
     closing = true;
     active = false;
     control.shutdownNow();
+    statusPublisher.shutdownNow();
+    releaseLowLatencyWifi();
     if (vehicle != null) vehicle.close();
     if (dashboard != null) dashboard.close();
     if (video != null) video.close();

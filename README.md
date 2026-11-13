@@ -132,7 +132,7 @@ Tracker measurements supplied on 2026-11-12 replace the earlier 168.5 mm wheelba
 
 The prior GPIO25 connection sensed the regulated 5 V buck output through 1 kΩ / 2 kΩ; it was not a pack monitor and is now inactive in runtime firmware (`hardware.batteryPin: null`). The current **12.6 / 10.5 / 9.0 V** full/warning/stop values are inactive 3S references. If monitoring is reenabled later, a newly calibrated 3S-rated divider and ADC1 pin are required. Do not connect the old 1.5-ratio divider to the pack: 12.6 V would put 8.4 V on the GPIO.
 
-`hardware.physicalStopPin: null` means **no physical switch installed** and does not block runtime arming. A configured switch remains active-low and must use a distinct supported input. Dashboard emergency stop, deadman, command expiry and watchdog remain enabled.
+`hardware.physicalStopPin: null` means **no physical switch installed** and does not block runtime arming. A configured switch remains active-low and must use a distinct supported input. Dashboard emergency stop, fresh manual-intent deadlines, focus-loss stop and watchdog remain enabled. Manual driving uses armed WASD control with configurable drive/steering ramps; release decays toward zero. The [simple manual profile](docs/autonomy/manual-control.md) uses 300 ms input freshness and a 500 ms ESP watchdog; autonomous commands retain 100/150 ms timing.
 
 For plain-language definitions, units and measurement guidance for every remaining field, see [calibration parameters](docs/calibration-parameters.md).
 

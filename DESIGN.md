@@ -62,7 +62,7 @@ Six-pixel control corners and eight-pixel viewport corners. The console contains
 
 ## Components
 
-Manual drive uses a held deadman and stops on release/focus loss. Emergency stop has an Escape shortcut and requests acknowledgement. Inputs have visible labels, focus outlines and minimum 44px buttons. Empty camera/map and stale telemetry states are explicit.
+Manual drive becomes keyboard-ready after manual arming. WASD and press-and-hold on-screen direction buttons ramp signed drive/steering requests; release decays toward zero at the configured rate. Drive and steering rate fields use percent of full scale per second (100 and 250 by default). Focus loss, stale telemetry and disconnect clear keyboard input immediately. Emergency stop has an Escape shortcut and requests acknowledgement. Inputs have visible labels, focus outlines and minimum 44px buttons. Empty camera/map and stale telemetry states are explicit.
 
 ## Do's and Don'ts
 

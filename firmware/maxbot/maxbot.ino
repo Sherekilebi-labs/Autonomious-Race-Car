@@ -107,7 +107,8 @@ void bridge(int forwardChannel,int reverseChannel,int pwm,bool brake){
 #endif
 }
 void halt(const char* reason,bool latch=false){
-  drivePwm=0;integral=0;lastError=0;stallSince=0;
+  // Zero outputs revoke the previous motion lease; STOP must not leave an old expiry armed.
+  drivePwm=0;absoluteExpiry=0;integral=0;lastError=0;stallSince=0;
   lastMotion=0;
   bridge(0,1,0,true);bridge(2,3,0,false);
   if(reason[0]){fault=reason;armed=false;manualArmed=false;}
@@ -158,7 +159,7 @@ void receive(const String& input,bool network,IPAddress ip=IPAddress(),uint16_t 
   String canonical=signedText;
   if(!sameMac(hmac(canonical),msg["mac"]|""))return;
   uint64_t validated=timeMs();
-  if(!maxbot::validDeadline(validated,issued,expiry)){deadlineRejected.fetch_add(1);return;}
+  if(!maxbot::validCommandDeadline(validated,issued,expiry,mode.c_str())){deadlineRejected.fetch_add(1);return;}
   if(activeSession.length()&&session!=activeSession){
     MotorSnapshot current;portENTER_CRITICAL(&snapshotMux);current=snapshot;portEXIT_CRITICAL(&snapshotMux);
     if(mode!="RESET"||current.armed||current.pwm!=0||epoch<=ordering.epoch)return;
@@ -206,7 +207,7 @@ void acknowledgeStop(){
 }
 void applyCommand(const Command& c){
   uint64_t now=timeMs();
-  if(!maxbot::validDeadline(now,c.issued,c.expiry)){deadlineRejected.fetch_add(1);return;}
+  if(!maxbot::validCommandDeadline(now,c.issued,c.expiry,c.mode)){deadlineRejected.fetch_add(1);return;}
   const char* mode=c.mode;
   if(c.epoch<motionEpoch)return;
   if(c.epoch>motionEpoch){halt("");motionEpoch=c.epoch;absoluteExpiry=0;}
@@ -220,7 +221,7 @@ void applyCommand(const Command& c){
   else if(strcmp(mode,"ARM")==0||strcmp(mode,"ARM_MANUAL")==0){
     bool permitted=strcmp(mode,"ARM")==0?MAXBOT_CALIBRATED:MANUAL_COMMISSIONING_ENABLED;
     if(permitted&&outputsReady&&!emergency&&!fault.length()&&physicalStopReleased()&&batteryHealthy()){
-      armed=true;manualArmed=strcmp(mode,"ARM_MANUAL")==0;targetAngle=actualAngle;drivePwm=0;
+      armed=true;manualArmed=strcmp(mode,"ARM_MANUAL")==0;targetAngle=actualAngle;drivePwm=0;absoluteExpiry=0;
     }
   }else if(armed&&!emergency&&!fault.length()&&c.stopGeneration==resetGeneration&&((strcmp(mode,"DRIVE_MANUAL")==0)==manualArmed)){
     targetAngle=c.angle/1000.f;drivePwm=manualArmed?constrain(c.pwm,-MANUAL_MAX_PWM,MANUAL_MAX_PWM):c.pwm;lastMotion=now;absoluteExpiry=c.expiry;
@@ -232,6 +233,13 @@ void applyCommand(const Command& c){
   strlcpy(event.session,c.session,sizeof(event.session));
   if(xQueueSend(applications,&event,0)!=pdTRUE)applicationLoss.fetch_add(1);
 }
+void checkMotionDeadline(){
+  if(armed&&absoluteExpiry&&maxbot::expired(timeMs(),absoluteExpiry)){
+    // Manual gaps neutralize; autonomous expiry still disarms with a fault.
+    if(manualArmed)halt("");else halt("ABSOLUTE_EXPIRY");
+  }
+  if(armed&&timeMs()-lastCommand>=(manualArmed?maxbot::kManualLinkMs:150))halt("WATCHDOG");
+}
 void motorTask(void*){
   TickType_t next=xTaskGetTickCount();char lastFault[32]="";
   for(;;){
@@ -242,8 +250,7 @@ void motorTask(void*){
     // The stop latch takes priority even over queued reset/arm commands.
     if(stopGeneration.load()!=resetGeneration)halt("OPERATOR_STOP",true);
     sensors();uint64_t sensorTime=timeMs();
-    if(armed&&absoluteExpiry&&maxbot::expired(timeMs(),absoluteExpiry)){halt("ABSOLUTE_EXPIRY");absoluteExpiry=0;}
-    if(armed&&timeMs()-lastCommand>=150)halt("WATCHDOG");
+    checkMotionDeadline();
     steeringLoop();
     if(strcmp(lastFault,fault.value)!=0){
       strlcpy(lastFault,fault.value,sizeof(lastFault));Applied local{};local.seq=lastSequence;local.epoch=motionEpoch;local.applied=timeMs();local.expiry=absoluteExpiry;local.pwm=drivePwm;strlcpy(local.reason,lastFault,sizeof(local.reason));strlcpy(local.session,motorSession,sizeof(local.session));
@@ -289,7 +296,7 @@ void steeringLoop(){
   if(!armed||emergency||fault.length()){bridge(0,1,0,true);bridge(2,3,0,false);return;}
   bridge(0,1,drivePwm*DRIVE_POLARITY,true);
   // Holding a fresh STOP never renews an old steering target.
-  if(timeMs()-lastMotion>100){bridge(2,3,0,false);integral=0;return;}
+  if(!lastMotion||timeMs()-lastMotion>(manualArmed?maxbot::kManualInputMs:100)){bridge(2,3,0,false);integral=0;return;}
   float error=targetAngle-actualAngle;
   if(fabs(error)<=STEER_DEADBAND){bridge(2,3,0,false);integral=0;stallSince=0;return;}
   integral=constrain(integral+error*.005f,-50.f,50.f);

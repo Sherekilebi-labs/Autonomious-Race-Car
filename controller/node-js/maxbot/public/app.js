@@ -1,21 +1,25 @@
 'use strict'
 
 const $ = id => document.getElementById(id)
-let socket, paired = false, robot = false, seq = 0, latest = null, peer = null, candidates = [], held = false, heartbeatTimer, manualTimer, lastTelemetry = 0, sessionId = "", eventId = 0
+let socket, paired = false, robot = false, seq = 0, latest = null, peer = null, candidates = [], held = false, heartbeatTimer, lastTelemetry = 0, sessionId = "", eventId = 0
 const encoder = new TextEncoder()
 const send = m => { if (paired && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ ...m, seq: ++seq })) }
 const command = (action, values = {}) => send({ type: 'command', action, ...values })
+const controlHistory = []
+function recordControl (sample) { controlHistory.push({ time_ms: Date.now(), ...sample }); if (controlHistory.length > 1000) controlHistory.shift() }
 const modeMoving = () => ['SCOUT', 'RUN', 'MANUAL'].includes(latest?.mode)
 
 function availability () {
   const fresh = paired && robot && Date.now() - lastTelemetry < 600
   document.querySelectorAll('[data-action]').forEach(button => {
     const action = button.dataset.action
-    const ready = action === 'arm_manual' ? latest?.manual_ready : latest?.calibrated
+    const ready = action === 'arm_manual' ? latest?.manual_ready && latest?.vehicle_connected !== false && !latest?.mcu_fault && !(latest?.armed && latest?.manual_armed) : latest?.calibrated
     button.disabled = !fresh || (!['stop', 'reset'].includes(action) && (!ready || latest?.mode === 'ESTOP')) || (action === 'run' && latest?.mode !== 'READY')
   })
-  $('deadman').disabled = !fresh || !latest?.manual_ready || !latest?.armed || !latest?.manual_armed || latest?.mode === 'ESTOP'
-  $('steer').disabled = $('throttle').disabled = $('deadman').disabled
+  const ready = manualReady()
+  $('manual-control').dataset.ready = String(Boolean(ready))
+  for (const code of controlCodes) $('key-' + code.slice(-1).toLowerCase()).disabled = !ready
+  if (!ready) release()
   $('collect').disabled = !fresh
   const stopped = fresh && !modeMoving() && !latest?.armed
   for(const id of ['upload','plan','freeze-map','export','review','benchmark-start','benchmark-stop']) $(id).disabled = !stopped
@@ -24,7 +28,7 @@ function availability () {
   $('upload').disabled = !stopped || $('upload').dataset.busy==='yes'
   $('activate').disabled = !stopped || !$('activate').dataset.ready || $('upload').dataset.busy==='yes'
   $('connection').textContent = !paired ? 'Disconnected' : !robot ? 'Waiting for Pixel' : fresh ? 'Pixel connected' : 'Telemetry stale'
-  if (!fresh) { release(); if (latest) $('fault').textContent = 'Telemetry expired. Motion must remain stopped.' }
+  if (!fresh) { $('control-delivery').textContent = 'No fresh phone telemetry. Connect the Pixel before diagnosing motor output.'; release(); if (latest) { $('fault').classList.toggle('informational', false); $('fault').textContent = 'Telemetry expired. Motion must remain stopped.' } }
 }
 
 async function mac (key, message) {
@@ -88,17 +92,105 @@ async function signal (m) {
 document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => { release(); command(button.dataset.action) }))
 $('estop').addEventListener('click', () => { release(); command('estop'); $('notice').textContent = paired ? 'Emergency stop requested; verify ESP32 acknowledgement.' : 'Disconnected: software stop cannot reach the car. Disconnect motor power.' })
 document.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); $('estop').click() } })
-for (const id of ['steer', 'throttle']) $(id).addEventListener('input', () => { $('steer-value').value = `${$('steer').value}°`; $('throttle-value').value = `${$('throttle').value} PWM` })
-function manual () { if (held) command('manual', { steering_deg: Number($('steer').value), pwm: Number($('throttle').value), deadman: true, session_id: sessionId, event_id: ++eventId, event_ms: Date.now(), deadline_ms: Date.now()+100 }) }
-function release () {
-  if (held) { held = false; command('manual', { steering_deg: 0, pwm: 0, deadman: false, session_id: sessionId, event_id: ++eventId, event_ms: Date.now(), deadline_ms: Date.now()+100 }) }
-  clearInterval(manualTimer); $('deadman').classList.remove('held')
+const ramp = new ManualRamp(), driveKeys = new Set(), keyboardKeys = new Set(), pointerKeys = new Map()
+let manualTime = performance.now()
+const controlCodes = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD'])
+const keyCode = event => event.code || ({ w: 'KeyW', a: 'KeyA', s: 'KeyS', d: 'KeyD' }[event.key?.toLowerCase()])
+const editing = target => Boolean(target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])'))
+function manualReady () {
+  return paired && robot && socket?.readyState === WebSocket.OPEN && !document.hidden &&
+    Date.now() - lastTelemetry < 600 && latest?.vehicle_connected !== false && !latest?.mcu_fault && latest?.manual_ready && latest?.armed && latest?.manual_armed && latest?.mode !== 'ESTOP'
 }
-$('deadman').addEventListener('pointerdown', event => { if ($('deadman').disabled) return; event.preventDefault(); held = true; $('deadman').setPointerCapture(event.pointerId); $('deadman').classList.add('held'); manual(); manualTimer = setInterval(manual, 50) })
-for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) $('deadman').addEventListener(type, release)
-$('deadman').addEventListener('keydown', event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat && !$('deadman').disabled) { event.preventDefault(); held = true; manual(); manualTimer = setInterval(manual, 50); $('deadman').classList.add('held') } })
-$('deadman').addEventListener('keyup', release)
-$('deadman').addEventListener('blur',release)
+function paintManual () {
+  const pwm = Math.round(ramp.drive * Number($('throttle').max))
+  const angle = ramp.steering * (ramp.steering >= 0 ? Number($('steer').max) : -Number($('steer').min))
+  $('throttle').value = pwm; $('steer').value = angle
+  $('throttle-value').value = `${pwm} PWM`
+  $('steer-value').value = `${angle.toFixed(1)}°`
+  for (const [id, value] of [['throttle-fill', ramp.drive], ['steer-fill', -ramp.steering]]) {
+    $(id).style.left = `${50 + Math.min(0, value) * 50}%`
+    $(id).style.width = `${Math.abs(value) * 50}%`
+  }
+  for (const code of controlCodes) {
+    const button = $('key-' + code.slice(-1).toLowerCase())
+    button.classList.toggle('pressed', driveKeys.has(code))
+    button.setAttribute('aria-pressed', String(driveKeys.has(code)))
+  }
+  return { pwm, steering_deg: angle }
+}
+function manualPacket (active, values = { pwm: 0, steering_deg: 0 }) {
+  const now = Date.now()
+  recordControl({ source: 'browser', active, ...values })
+  command('manual', { ...values, deadman: active, session_id: sessionId, event_id: ++eventId, event_ms: now, deadline_ms: now + MANUAL_PROFILE.inputMs })
+}
+function release () {
+  const wasHeld = held
+  held = false; driveKeys.clear(); keyboardKeys.clear(); pointerKeys.clear(); ramp.reset(); manualTime = performance.now(); paintManual()
+  if (wasHeld) manualPacket(false)
+}
+function manualStep () {
+  const now = performance.now(), elapsed = (now - manualTime) / 1000
+  manualTime = now
+  if (!manualReady() || !document.hasFocus() || editing(document.activeElement)) { release(); return }
+  if (!ramp.step(driveKeys, elapsed, Number($('drive-rate').value), Number($('steering-rate').value))) { release(); return }
+  const values = paintManual()
+  const active = driveKeys.size > 0 || ramp.drive !== 0 || ramp.steering !== 0
+  if (active) { held = true; manualPacket(true, values) }
+  else if (held) { held = false; manualPacket(false) }
+}
+document.addEventListener('keydown', event => {
+  const code = keyCode(event)
+  if (!controlCodes.has(code)) return
+  if (editing(event.target) || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) { release(); return }
+  if (!manualReady()) return
+  event.preventDefault()
+  if (event.repeat) return
+  manualStep(); keyboardKeys.add(code); combineKeys(); paintManual()
+})
+document.addEventListener('keyup', event => {
+  const code = keyCode(event)
+  if (!controlCodes.has(code)) return
+  if (keyboardKeys.has(code)) { event.preventDefault(); manualStep(); keyboardKeys.delete(code); combineKeys(); paintManual() }
+})
+function combineKeys () {
+  driveKeys.clear()
+  for (const code of [...keyboardKeys, ...pointerKeys.values()]) driveKeys.add(code)
+}
+for (const code of controlCodes) {
+  const button = $('key-' + code.slice(-1).toLowerCase())
+  function begin (id) {
+    if (!manualReady()) return
+    button.focus(); manualStep(); pointerKeys.set(id, code); combineKeys(); paintManual()
+  }
+  function end (id) {
+    if (!pointerKeys.has(id)) return
+    manualStep(); pointerKeys.delete(id); combineKeys(); paintManual()
+  }
+  button.addEventListener('pointerdown', event => {
+    if (button.disabled || (event.button !== undefined && event.button !== 0)) return
+    event.preventDefault(); begin(event.pointerId); button.setPointerCapture(event.pointerId)
+  })
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) button.addEventListener(type, event => end(event.pointerId))
+  button.addEventListener('keydown', event => {
+    if (event.key !== ' ' && event.key !== 'Enter') return
+    event.preventDefault(); if (!event.repeat) begin('keyboard-' + code)
+  })
+  button.addEventListener('keyup', event => {
+    if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); end('keyboard-' + code) }
+  })
+  button.addEventListener('blur', () => end('keyboard-' + code))
+}
+document.addEventListener('focusin', event => { if (editing(event.target)) release() })
+for (const [id, help, prefix] of [['drive-rate', 'drive-rate-help', '0 to full'], ['steering-rate', 'steering-rate-help', 'Center to full']]) {
+  $(id).addEventListener('input', () => {
+    const value = Number($(id).value), valid = Number.isFinite(value) && value >= 1 && value <= 1000
+    $(id).setAttribute('aria-invalid', String(!valid))
+    $(help).textContent = valid ? `${prefix} in ${Number((100 / value).toFixed(3))} seconds` : 'Enter a rate from 1 to 1000 % / second.'
+    $('rate-error').textContent = ['drive-rate','steering-rate'].some(field => $(field).getAttribute('aria-invalid') === 'true') ? 'Keyboard control paused until both rates are valid.' : ''
+    if (!valid) release()
+  })
+}
+setInterval(manualStep, 20)
 window.addEventListener('blur', () => { release(); command('stop') })
 document.addEventListener('visibilitychange', () => { if (document.hidden) { release(); command('stop') } })
 window.addEventListener('pagehide', cleanup)
@@ -107,6 +199,17 @@ $('collect').addEventListener('change', () => command('collection', { enabled: $
 const fixed = (value, places = 2) => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(places) : '—'
 function render (m) {
   $('mode').textContent = m.mode || 'UNKNOWN'
+  const fields = ['mode','armed','manual_armed','manual_input_ms','manual_link_ms','vehicle_connected','mcu_fault','link','fault','pwm','target_steering_deg','steering_deg','clock_uncertainty_ms','mcu_deadline_rejected','mcu_application_loss','timing_application_age_ms','mcu_pwm','wifi_latency_mode','control_age_ms','control_max_gap_ms']
+  const delivery = m.vehicle_control || {}
+  const vehicleControl = Object.fromEntries(['gate','last_sent_mode','ack_sequence','ack_epoch','pending_zero_sequence','ack_age_ms','ack_pwm'].filter(key => Object.hasOwn(delivery, key)).map(key => [key, delivery[key]]))
+  const dashboardTiming = m.dashboard_control || {}
+  const dashboardControl = Object.fromEntries(['clock_uncertainty_ms','last_manual_budget_ms','last_manual_age_ms'].filter(key => Object.hasOwn(dashboardTiming, key)).map(key => [key, dashboardTiming[key]]))
+  recordControl({ source: 'phone', ...Object.fromEntries(fields.filter(key => Object.hasOwn(m, key)).map(key => [key, m[key]])), vehicle_control: vehicleControl, dashboard_control: dashboardControl })
+  const uncertainty = m.clock_uncertainty_ms
+  const clock = !Object.hasOwn(m, 'clock_uncertainty_ms') ? 'not reported' : uncertainty === null ? 'not synchronized' : `${fixed(uncertainty, 1)} ms`
+  const rejected = Number.isInteger(m.mcu_deadline_rejected) ? m.mcu_deadline_rejected : 'not reported'
+  $('control-delivery').textContent = `Phone mode: ${m.mode || 'unknown'}\nPhone output: ${fixed(m.pwm, 0)} PWM / ${fixed(m.target_steering_deg, 1)}°\nVehicle link: ${m.link || 'not reported'}\nWi-Fi mode: ${m.wifi_latency_mode || 'not reported'}\nControl loop maximum gap: ${fixed(m.control_max_gap_ms, 1)} ms\nManual budget at phone: ${fixed(dashboardTiming.last_manual_budget_ms, 1)} ms\nMac clock uncertainty: ${fixed(dashboardTiming.clock_uncertainty_ms, 1)} ms\nESP clock uncertainty: ${clock}\nESP reported PWM: ${fixed(m.mcu_pwm, 0)}\nLast sent mode: ${delivery.last_sent_mode || 'not reported'}\nMotion gate: ${delivery.gate || 'not reported'}\nApplied acknowledgement age: ${fixed(delivery.ack_age_ms, 0)} ms\nESP rejected deadlines: ${rejected}\nStatus: ${m.fault || 'No phone fault reported'}`
+
   $('speed').textContent = `${fixed(m.speed_mps)} m/s`
   $('steering').textContent = `${fixed(m.steering_deg, 1)}° / ${fixed(m.target_steering_deg, 1)}°`
   $('battery').textContent = m.battery_monitoring === false ? 'Not monitored · manual pre-run check' : `${fixed(m.battery_v)} V · ${fixed(m.battery_percent, 0)}%`
@@ -114,16 +217,18 @@ function render (m) {
   $('progress').textContent = `${m.passed ?? 0} / 4`; $('elapsed').textContent = `${fixed(m.elapsed_s)} s`
   $('latency').textContent = `${fixed(m.frame_age_ms, 0)} / ${fixed(m.inference_ms, 0)} ms`
   $('tracking').textContent = m.tracking || 'Tracking unavailable'; $('model').textContent = m.model || 'Model unavailable'
-  $('fault').textContent = m.fault || 'Supervising. Emergency stop remains available.'
+  const manualInstruction = m.armed && m.manual_armed && (['Manual control: waiting for arm acknowledgement','Manual commissioning: verify direction and stop response with wheels raised'].includes(m.fault) || m.fault?.startsWith('Manual neutral:'))
+  $('fault').classList.toggle('informational', Boolean(manualInstruction))
+  $('fault').textContent = manualInstruction ? 'Manual armed. Use WASD or hold a direction button; release to return toward neutral.' : m.fault || 'Supervising. Emergency stop remains available.'
   $('calibration-summary').textContent = m.calibrated ? 'Autonomy calibration complete' : `Autonomy: ${m.missing?.length ?? '?'} requirements remaining`
-  $('manual-status').textContent = m.manual_ready ? (m.manual_armed ? 'Manual commissioning armed. Hold the deadman to move.' : 'Manual commissioning ready. Raise wheels for initial direction and stop tests, then arm.') : `Manual unavailable: ${(m.manual_missing || ['Waiting for configuration']).join('; ')}`
+  $('manual-status').textContent = m.vehicle_connected === false ? 'ESP32 link unavailable. Reconnect the phone to ESP Wi-Fi. After an app restart, use Reset stop to claim the new session.' : m.mcu_fault ? `Manual blocked: ${m.mcu_fault}. Stop / disarm, then Reset stop before arming.` : m.manual_ready ? (m.manual_armed ? 'Manual armed. Use WASD or hold a direction button while this window has focus.' : 'Manual commissioning ready. Press Arm manual control to use WASD.') : `Manual unavailable: ${(m.manual_missing || ['Waiting for configuration']).join('; ')}`
   $('stop-behavior').textContent = `Zero throttle / stop: ${m.stop_behavior || 'Not reported'}. Neutral pause required before reversing.`
   $('missing').replaceChildren(...(m.missing || []).map(text => { const li = document.createElement('li'); li.textContent = text; return li }))
   $('collect').checked = Boolean(m.collection)
-  if (Array.isArray(m.steering_limits_deg) && m.steering_limits_deg.length === 2 && !held) { $('steer').min = String(m.steering_limits_deg[0]); $('steer').max = String(m.steering_limits_deg[1]) }
-  if (Number.isInteger(m.manual_max_pwm) && m.manual_max_pwm >= 1 && m.manual_max_pwm <= 255 && !held) {
+  if (Array.isArray(m.steering_limits_deg) && m.steering_limits_deg.length === 2) { $('steer').min = String(m.steering_limits_deg[0]); $('steer').max = String(m.steering_limits_deg[1]) }
+  if (Number.isInteger(m.manual_max_pwm) && m.manual_max_pwm >= 1 && m.manual_max_pwm <= 255) {
     $('throttle').min = String(-m.manual_max_pwm); $('throttle').max = String(m.manual_max_pwm)
-    $('throttle').value = String(Math.max(-m.manual_max_pwm, Math.min(m.manual_max_pwm, Number($('throttle').value))))
+    paintManual()
   }
   $('notice').textContent = m.thermal_limited ? 'Phone warm: optional workload reduced.' : `${m.recording_status || 'Events recording'} · optional drops: ${m.recording_drops || 0}`
   $('timing').textContent = `Capture → PWM: ${m.capture_pwm_ms ? m.capture_pwm_ms.map(v=>fixed(v,1)).join(' / ')+' ms' : 'Not measured'} · Image available → PWM p50/p95/p99: ${(m.image_available_pwm_ms || []).map(v=>fixed(v,1)).join(' / ') || 'Not measured'} · Policy → PWM: ${(m.policy_pwm_ms || []).map(v=>fixed(v,1)).join(' / ') || 'Not measured'} · Window: ${m.timing_window_samples ?? 0} commands / ${m.image_timing_samples ?? 0} images over ${fixed(m.timing_window_ms,0)} ms · Last application age: ${fixed(m.timing_application_age_ms,0)} ms · Last image timing age: ${fixed(m.image_timing_age_ms,0)} ms · Steering onset p50/p95/p99: ${(m.steering_onset_ms || []).map(v=>fixed(v,1)).join(' / ') || 'Not measured'} ms (n=${m.steering_onset_samples ?? 0}) · Settling: ${(m.steering_settling_ms || []).map(v=>fixed(v,1)).join(' / ') || 'Not measured'} ms (n=${m.steering_settling_samples ?? 0}) · Total samples: ${m.timing_samples ?? 0} · Missing: ${m.timing_missing ?? '—'} · Pending: ${m.timing_pending ?? '—'} · MCU rejected deadlines: ${m.mcu_deadline_rejected ?? '—'} · MCU event loss: ${m.mcu_application_loss ?? '—'} · Applied after deadline: ${m.failed_deadlines ?? '—'} · Clock uncertainty: ${fixed(m.clock_uncertainty_ms,1)} ms`;
@@ -147,6 +252,10 @@ function drawMap (m) {
   ctx.font = '16px sans-serif'; (m.cones || []).forEach((p, i) => { const [x, y] = project(p); ctx.fillStyle = '#ca5400'; ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#182530'; ctx.fillText(String(i + 1), x + 12, y - 10) })
   if (m.pose) { const [x, y] = project(m.pose); ctx.save(); ctx.translate(x, y); ctx.rotate(-m.pose[2]); ctx.fillStyle = '#182530'; ctx.fillRect(-10, -5, 20, 10); ctx.fillStyle = '#0064b2'; ctx.fillRect(5, -5, 5, 10); ctx.restore() }
 }
+$('save-control-report').addEventListener('click', () => {
+  const report = { schemaVersion: 1, capturedAt: new Date().toISOString(), paired, phoneConnected: robot, telemetryAgeMs: latest ? Date.now() - lastTelemetry : null, motorApplicationReported: false, history: controlHistory }
+  download(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), 'maxbot-control-report.json')
+})
 function download (blob, name) { const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000) }
 $('screenshot').addEventListener('click', () => {
   const video = $('video'); if (!video.videoWidth) return

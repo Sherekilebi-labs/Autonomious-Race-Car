@@ -18,7 +18,17 @@ import org.maxbot.core.LatestFramePool;
 /** Optional recording never retains a control-camera slot or blocks the control thread. */
 final class RunRecorder implements AutoCloseable {
   final File directory;
-  private final ArrayBlockingQueue<String> events = new ArrayBlockingQueue<>(256);
+  private static final class Event {
+    final JSONObject payload,identity;final String type;final long receivedNs;
+    Event(JSONObject payload,JSONObject identity,String type,long receivedNs){this.payload=payload;this.identity=identity;this.type=type;this.receivedNs=receivedNs;}
+    JSONObject materialize()throws org.json.JSONException {
+      JSONObject record=new JSONObject(payload.toString());
+      if(type!=null){record.put("type",type).put("phone_received_ns",Long.toString(receivedNs));}
+      if(!record.has("_snapshot_file"))record.put("identity",identity);
+      return record;
+    }
+  }
+  private final ArrayBlockingQueue<Event> events = new ArrayBlockingQueue<>(256);
   private final byte[] selected = new byte[640 * 480 * 3 / 2];
   private final AtomicBoolean selectedBusy = new AtomicBoolean();
   private final int[] rgb = new int[640 * 480];
@@ -57,9 +67,12 @@ final class RunRecorder implements AutoCloseable {
     return recordingStatus;
   }
 
-  void event(JSONObject e) {
-    if(!running)return;
-    try{JSONObject record=new JSONObject(e.toString());if(!record.has("_snapshot_file"))record.put("identity",identity);if(!events.offer(record.toString()))dropped.incrementAndGet();}catch(org.json.JSONException invalid){dropped.incrementAndGet();}
+  // Transfers ownership of a completed JSON object. Producers must not mutate it after enqueue.
+  // JSON copying/serialization belongs to the background writer, never the motor transport lock.
+  void event(JSONObject e) { enqueue(e,null,0); }
+  void actuator(JSONObject e,long receivedNs) { enqueue(e,"actuator_telemetry",receivedNs); }
+  private void enqueue(JSONObject e,String type,long receivedNs) {
+    if(running&&!events.offer(new Event(e,identity,type,receivedNs)))dropped.incrementAndGet();
   }
 
   void snapshot(String file,JSONObject data){
@@ -108,9 +121,10 @@ final class RunRecorder implements AutoCloseable {
           videoTried = false;
           recordingStatus = "Events recording; optional video disabled";
         }
-        String e = events.poll(50, TimeUnit.MILLISECONDS);
-        if (e != null) {
-          JSONObject record=new JSONObject(e);
+        Event queued = events.poll(50, TimeUnit.MILLISECONDS);
+        String e=null;
+        if (queued != null) {
+          JSONObject record=queued.materialize();e=record.toString();
           if(record.has("_snapshot_file")){
             try(Writer snapshot=new FileWriter(new File(directory,record.getString("_snapshot_file")))){snapshot.write(record.has("raw")?record.getString("raw"):record.getJSONObject("data").toString());snapshot.write("\n");}
           }else{
@@ -150,7 +164,7 @@ final class RunRecorder implements AutoCloseable {
       HardwareRecorder old = video;
       video = null;
       if (old != null) old.close();
-      bitmap.recycle();
+      if(bitmap!=null)bitmap.recycle();
     }
   }
 

@@ -25,7 +25,7 @@ function start ({ key = process.env.MAXBOT_PAIRING_KEY, host = process.env.MAXBO
   hub.onExport=async m=>{try{if(hub.lastTelemetry?.armed||['SCOUT','RUN','MANUAL'].includes(hub.lastTelemetry?.mode))throw new Error('Export paused during motion');const result=await exports.receive(m);hub.send(hub.robot,{type:'export_ack',request_id:m.request_id,status:'ok',...result});if(result.status==='saved')hub.send(hub.operator,{type:'export',...result})}catch(e){await exports.close();hub.send(hub.robot,{type:'export_ack',request_id:m.request_id,status:'failed',message:e.message})}}
   let discoverySocket
   if(discover){const {discovery}=require('./services/discovery');discoverySocket=discovery({key,port})}
-  const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] }
+  const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/manual-control.js': ['manual-control.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] }
   const server = http.createServer((req, res) => {
     res.setHeader('Cache-Control', 'no-store')
     res.setHeader('X-Content-Type-Options', 'nosniff')

@@ -1,5 +1,7 @@
 # Task 1 deployment readiness
 
+Current manual-control profile: **[Simple manual control 0.4.0](manual-control.md)**. Manual freshness/watchdog are 300/500 ms; older 100/150 ms manual notes below describe previous releases. Autonomous timing remains 100/150 ms.
+
 Task-1 software implementation and host verification are complete for the checks listed below. **Autonomy is not commissioned. No physical movement, USB flashing, model training or physical course benchmark was performed.** Existing calibration flags remain unchanged.
 
 ## Build and artifacts
@@ -31,6 +33,22 @@ Installed Arduino CLI: `/Applications/Arduino IDE.app/Contents/Resources/app/lib
 4. Start `npm --prefix controller/node-js/maxbot start` with the private `MAXBOT_PAIRING_KEY`; the server binds the LAN and advertises only nonce-authenticated AP-local discovery. The default ESP address is 192.168.4.1. Use the Mac's localhost console to pair. Browser disappearance expires manual intent even while Node remains alive.
 5. Run the read-only `python3 tools/maxbot/probe.py` over Wi-Fi to verify signed boot, actuator and runtime source identity. A successful probe does **not** verify stop response. Exercise the direct stop with the phone unavailable, confirm the **applied** acknowledgement, then explicitly reset from the stopped phone workflow; reset does not arm.
 6. Under operator supervision, verify manual direction, steering table, zero/brake behavior and expiry. Preserve logical ±255 → physical ±170 duty, disabled battery monitoring and absent physical switch. Independently verify floor stopping distance; electrical brake confirmation is not that measurement.
+
+## Wi-Fi connection troubleshooting
+
+Both Mac and Pixel must stay on the ESP access point even when Android/macOS reports no internet. The console requires its private operator pairing as well as the running MaxBot phone app. The phone discovers the dashboard's current AP address before falling back to its configured URL. Joining or changing Wi-Fi rebuilds the vehicle socket on the next handshake, clears queued commands and clock/timing state, and never restores motion authority. A failed send closes the socket so the next attempt can recover. Handshake failures now include the exception type and message on the phone and log details under `MaxBotVehicle`.
+
+The current phone interface shows status text; its ARCore preview surface is hidden. View camera video on the paired Mac console. Camera permissions and Google Play Services for AR must be available independently of the vehicle handshake. A missing preview alone does not identify a camera failure; read the camera status line.
+
+After the Wi-Fi recovery changes, Android assemble/lint and all 2,935 core checks pass. Pixel reconnect and video remain unverified without a connected device. For USB diagnosis, use a data-capable cable, enable Developer options → USB debugging, unlock the Pixel and accept the Mac's debugging authorization. A Pixel need not appear in Finder to support ADB.
+
+## Manual WASD control
+
+After **Arm manual commissioning** is acknowledged, use W/S for forward/brake/reverse and A/D for left/right, or press and hold the corresponding on-screen direction buttons. No separate hold button is required. Drive ramps from zero to full in 1 second; steering reaches full lock from center in 0.4 seconds. Releasing an axis returns its request toward zero at the same rate. Opposite keys move the signed request through zero; holding both opposing keys returns it to neutral. The existing phone/firmware reverse pause and measured-speed braking checks still apply, so a requested reverse ramp does not override those interlocks. Readouts show requested PWM/angle rather than measured braking force.
+
+Edit **Drive ramp** (default 100 %/second) and **Steering ramp** (default 250 %/second) directly on the Mac. Allowed values are 1–1000; time from zero to full is 100 divided by the rate. Values apply immediately and reset to defaults on page reload. Focusing an editable field clears input; keyboard control resumes with a fresh key press after leaving the field. Window focus/visibility loss, disconnect, disarm, stale telemetry or a control-loop pause over 100 ms immediately clear commands. Key repeat cannot restart cleared input. Session/event/deadline checks, the phone control loop and firmware watchdog remain in force. No phone update or ESP reflash is needed for this dashboard change. All 24 Node tests pass; isolated Chrome checks at 1440 px and 390 px pass without overflow or JavaScript exceptions. Browser-to-WebSocket-to-Hub forwarding was verified against an isolated test robot for full drive/steering ramp, mouse-held direction input, release decay, edit-focus zero and window-blur stop. The known manual-arming instruction is shown as informational after confirmed arming; actual faults retain their red status. This does not claim physical response verification.
+
+The **Control delivery** readout distinguishes browser requests from phone-requested PWM/angle and reports the phone link, ESP clock uncertainty and cumulative MCU deadline rejects. **Save control report** downloads the most recent 1,000 browser/phone samples using an explicit field allowlist; it excludes private pairing configuration and camera frames. It does not claim motor application acknowledgement. When diagnosing no motion, record a supervised input attempt and stop/disarm before sharing the report. No physical cause has been confirmed without live device evidence.
 
 ## Measurement and artifact workflow
 
@@ -78,3 +96,42 @@ Final verification: **2,935 Java core assertions**, **26 Python tests passed** i
 Desktop 1440 px and narrow 390 px Chrome checks found no horizontal overflow or JavaScript exceptions. The independently reviewed keyboard deadman and artifact serialization findings were both scored resolved; that verdict applies to those fixes. The Impeccable engine/detector was unavailable, so project context, captures and the independent review supplied evidence instead. DESIGN.md tokens were preserved. Source explorer checks pass for **227 routes / 210 source links** at both layouts.
 
 [Machine-readable host report](benchmarks/task1-host-report.json) contains actual host results and null device measurements. Potentiometer response definitions are explicit: at least a 7° applied target step, 1° onset, settling within 3.5° for 100 ms; telemetry gaps over 60 ms censor the estimate. These definitions do not establish steering dynamics until measured. Traction physical latency remains unavailable. Real-cone evaluation provenance must explicitly approve a model before live autonomy; tensor compatibility/warm-up alone never does.
+
+
+## Command acknowledgement repair (Android 0.3.1)
+
+The downloaded `maxbot-control-report.json` confirmed receipt of browser input by the phone (42 MANUAL samples, requested PWM up to 255), repeated manual deadline expiry and ESP clock uncertainty from 4.044 to 38.752 ms. The MCU rejection counter remained 11 throughout; that count does not establish new MCU rejection during the attempt. The report had no recorded causal application time.
+
+A code-level defect explains the motion takeover stall: firmware `applied`/`local_applied` messages carry `applied_ms` rather than `time_ms`, but VehicleLink previously read `time_ms` before checking message type. This discarded signed application acknowledgements and prevented the applied-zero takeover gate from completing. Android 0.3.1 scopes `time_ms` to hello/telemetry only. HMAC, boot/session identity, deadline, and zero-ack requirements are retained. The APK must be updated on the Pixel; no ESP reflash is required for this fix. Clock uncertainty above 20 ms and expired browser intents still stop motion and remain separate observed issues.
+
+Regression tests exercise the real VehicleLink receive method with firmware-shaped replies lacking `time_ms`, including invalid signatures/boot/session and still-required hello/telemetry timestamps. New phone telemetry exposes the last sent mode, blocking gate, authenticated applied sequence/age/PWM, and MCU-reported PWM. These describe software command application, not physical motor voltage or movement. Physical verification is pending installation on the Pixel.
+
+Validation: original-parser regression run failed the valid-ack cases as expected; the fixed parser passes all four Android unit tests. Android assemble/lint and 2,935 core checks pass; all 24 Node tests and isolated browser control checks pass. The final private APK is also available as `dist/task1-private/maxbot-0.3.1-debug.apk`. Installation and physical verification remain pending.
+
+
+## STOP/arm deadline lifecycle repair
+
+`halt()` previously set motor PWM to zero without revoking the previous motion command's absolute deadline. A subsequent STOP, DISARM, RESET or rearm could therefore carry an obsolete motion deadline into the idle/armed state and trigger `ABSOLUTE_EXPIRY`. The firmware now clears that deadline whenever outputs are halted and whenever ARM/ARM_MANUAL explicitly sets drive PWM to zero. Active DRIVE/DRIVE_MANUAL commands still install their original bounded deadlines; expiry and watchdog enforcement are retained. ARM still cannot clear an existing fault. For an existing expiry fault, stop/disarm, use **Reset stop**, then arm explicitly.
+
+`tools/maxbot/test-firmware-stop.py` compiles the real `halt` and `applyCommand` bodies with host actuator/queue stubs. The old firmware fails its STOP/deadline assertion; the fix passes STOP→DISARM→ARM, zero-output ARM during motion, active-command expiry, fault/reset and expired-motion rejection checks. Hardware actuation is not simulated by that test. This change requires an ESP reflash, while keeping the actuator calibration and phone 0.3.1 pairing unchanged.
+
+Flashed the STOP/arm lifecycle repair to the connected classic ESP32 over `/dev/cu.SLAB_USBtoUART`; flash hashes verified. Authenticated firmware identity `535b4457ba0dfa3960e2f1942d9a861f3be038699da77e475020276d338b3ab1` and unchanged actuator identity `210b9c6c3489ffac1a75e66182cf207d60b6042937fac9dc7cd534210accd687` were verified over serial. All 150 samples showed disarmed/manual-disarmed, zero PWM, no fault and zero deadline rejects/overruns/application loss. No arming or motion was sent; physical movement and live packet-timing behavior remain unverified.
+
+
+## Latency mitigation (Android 0.3.2)
+
+The second downloaded report (`maxbot-control-report (1).json`) shows 20 ms browser command spacing (maximum 21 ms), real nonzero ESP-reported PWM up to 39, then `ABSOLUTE_EXPIRY` after roughly 350 ms of browser input. The MCU rejection counter increased from 55 to 56; it did not show a sustained rejection flood. Clock uncertainty ranged from 3.006 to 34.202 ms over the complete report. The report confirms a real motion-deadline failure but does not isolate radio power saving, packet jitter or phone scheduling as its sole cause.
+
+Android 0.3.2 requests a foreground low-latency Wi-Fi lock (released on pause/destroy), moves large status/camera/map/UI publication onto a separate 100 ms worker, and probes both clocks every 500 ms. Clock sync retains a better recent uncertainty bound instead of replacing it with a slower RTT sample; retained samples continue aging and cannot extend the 5-second validity. Reset/discontinuity detection, 100 ms command age and 20 ms ESP clock uncertainty limits are preserved. New reports include Wi-Fi lock status, maximum control-loop gap, Mac clock uncertainty and remaining manual-intent budget at phone receipt. These changes target observed latency risks; physical resolution remains unverified until the new APK is installed and retested.
+
+Android Wi-Fi lock behavior and foreground/screen-on requirements: https://developer.android.com/reference/android/net/wifi/WifiManager#WIFI_MODE_FULL_LOW_LATENCY . The existing app keeps the display awake while active; the lock is not requested for USB transport.
+
+0.3.2 validation: Android assemble/lint and four acknowledgement unit tests pass; the core suite passes 2,951 checks including clock-sample selection/expiry/discontinuity cases. Pixel was not available through ADB, so the private versioned APK is prepared but not installed. No firmware reflash is needed for the Android latency changes.
+
+## Consolidated manual-control audit (Android 0.3.3)
+
+See [manual-control-audit.md](manual-control-audit.md) for the confirmed defects, fixes, test evidence and physical limits. The versioned private APK is `dist/task1-private/maxbot-0.3.3-debug.apk`. Validation passes: 16 Android unit tests, 2,955 core checks, 26 Node tests, isolated desktop/mobile browser checks and firmware deadline/calibration tests. This release includes the 0.3.2 latency changes and does not require another ESP reflash if the prior STOP/arm repair is installed. USB debugging is unavailable; installation and a sustained physical run remain pending.
+
+## Operator-confirmed working checkpoint
+
+On 14 November 2026 (Asia/Dubai), the operator confirmed manual control 0.4.0 works. The source recovery tag is `manual-control-v0.4.0-working`; the private local artifact/configuration snapshot is `dist/checkpoints/manual-control-v0.4.0-working/`. See the [checkpoint record](checkpoints/manual-control-v0.4.0-working.md). This supersedes the installation-pending status for manual 0.4.0 above; it does not commission autonomy or certify measured stopping performance.

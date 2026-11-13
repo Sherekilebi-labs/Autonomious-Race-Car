@@ -1,6 +1,7 @@
 'use strict'
 
 const crypto = require('node:crypto')
+const { MANUAL_PROFILE } = require('./public/manual-control')
 const sign = (key, message) => crypto.createHmac('sha256', key).update(message).digest('hex')
 const equal = (a, b) => typeof b === 'string' && /^[a-f0-9]{64}$/.test(b) && crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'))
 
@@ -29,7 +30,7 @@ class Hub {
     if (!state.authenticated) {
       if (this.clock() - state.joined > 10000 || m.type !== 'auth' || m.role !== state.role || !equal(sign(this.key, `AUTH|${state.role}|${state.nonce}`), m.mac)) return peer.close(1008, 'Pairing failed')
       if ((state.role === 'robot' && this.robot) || (state.role === 'operator' && this.operator)) return peer.close(1008, 'Role already connected')
-      state.authenticated = true; state.nonce = null
+      state.authenticated = true; state.nonce = null; state.heartbeat = this.clock()
       if (state.role === 'robot') this.robot = peer
       else { this.operator = peer; state.heartbeat = this.clock() }
       this.send(peer, { type: 'authenticated', role: state.role, robot: Boolean(this.robot), session_id: state.sessionId, server_ms: this.clock() })
@@ -52,7 +53,7 @@ class Hub {
       if (!['arm', 'arm_manual', 'scout', 'run', 'stop', 'estop', 'reset', 'manual', 'collection', 'freeze', 'verify', 'benchmark', 'export', 'review'].includes(m.action)) return
       if (m.action === 'manual' && (!Number.isFinite(m.steering_deg) || !Number.isInteger(m.pwm) || Math.abs(m.pwm) > 255 || typeof m.deadman !== 'boolean')) return
       if (m.action === 'manual') {
-        if (m.session_id !== state.sessionId || !Number.isSafeInteger(m.event_id) || m.event_id <= state.eventId || !Number.isSafeInteger(m.event_ms) || !Number.isSafeInteger(m.deadline_ms) || m.deadline_ms <= this.clock() || m.deadline_ms - m.event_ms > 100 || m.deadline_ms <= m.event_ms || m.event_ms > this.clock() + 20) return
+        if (m.session_id !== state.sessionId || !Number.isSafeInteger(m.event_id) || m.event_id <= state.eventId || !Number.isSafeInteger(m.event_ms) || !Number.isSafeInteger(m.deadline_ms) || m.deadline_ms <= this.clock() || m.deadline_ms - m.event_ms > MANUAL_PROFILE.inputMs || m.deadline_ms <= m.event_ms || m.event_ms > this.clock() + 20) return
         state.eventId = m.event_id
       }
       if (m.action==='estop' && this.directStop) this.directStop.request()
@@ -71,7 +72,7 @@ class Hub {
 
   tick () {
     for (const [peer, state] of this.peers) {
-      if(state.authenticated&&state.role==='robot'&&state.heartbeat&&this.clock()-state.heartbeat>1500){this.detach(peer);peer.close(1008,'Phone registration expired');continue;}
+      if(state.authenticated&&state.role==='robot'&&this.clock()-state.heartbeat>1500){this.detach(peer);peer.close(1008,'Phone registration expired');continue;}
       if ((!state.authenticated && this.clock() - state.joined > 10000) || (state.authenticated && state.role === 'operator' && this.clock() - state.heartbeat > 500)) {
         this.detach(peer); peer.close(1008, 'Operator heartbeat expired')
       }

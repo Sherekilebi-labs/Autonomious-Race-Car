@@ -161,7 +161,7 @@ public final class Calibration {
           || !Double.isFinite(limits.clearanceM)
           || limits.clearanceM < .05) m.add("Conservative scout speed/clearance");
     }
-    if (limits.commandTtlMs != 100 || limits.watchdogMs != 150 || limits.supervisorMs != 500)
+    if (autonomous && (limits.commandTtlMs != 100 || limits.watchdogMs != 150 || limits.supervisorMs != 500))
       m.add("Protocol timing must be 100/150/500 ms");
     if (!"wifi".equals(network.transport) && !"usb".equals(network.transport))
       m.add("network.transport");

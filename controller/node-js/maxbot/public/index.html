@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MaxBot · Slalom console</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+  <meta charset="utf-8"><meta name="maxbot-console-version" content="0.4.0"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MaxBot · Slalom console</title><link rel="stylesheet" href="/style.css"><script src="/manual-control.js" defer></script><script src="/app.js" defer></script>
 </head>
 <body>
   <header><div><h1>MaxBot</h1><span class="subtitle">Slalom console</span></div><div class="connection"><span id="connection">Disconnected</span><span id="direct-stop-status" role="status">Direct stop: unavailable</span><button id="estop" class="danger">Emergency stop <kbd>Esc</kbd></button></div></header>
@@ -19,13 +19,27 @@
       <aside>
         <div class="section-title"><h2>Vehicle</h2><span id="mode">DISCONNECTED</span></div>
         <dl id="telemetry"><div><dt>Speed <small>vision estimate</small></dt><dd id="speed">— <span>m/s</span></dd></div><div><dt>Steering <small>actual / target</small></dt><dd id="steering">—</dd></div><div><dt>Battery <small id="battery-method">voltage estimate</small></dt><dd id="battery">—</dd></div><div><dt>Cones cleared</dt><dd id="progress">0 / 4</dd></div><div><dt>Run time</dt><dd id="elapsed">—</dd></div><div><dt>Frame age / inference</dt><dd id="latency">—</dd></div></dl>
-        <div class="section-title"><h2>Manual override</h2></div>
-        <button data-action="arm_manual" disabled>Arm manual commissioning</button>
+        <div class="section-title"><h2>Manual control</h2></div>
+        <button data-action="arm_manual" disabled>Arm manual control</button>
         <p id="manual-status" class="instruction" role="status">Waiting for manual commissioning status.</p>
-        <label class="range-label" for="steer">Steering request <output id="steer-value">0°</output></label><input type="range" id="steer" min="-10" max="10" value="0" step="1" disabled>
-        <label class="range-label" for="throttle">Motor request <output id="throttle-value">0 PWM</output></label><input type="range" id="throttle" min="-255" max="255" value="0" step="1" disabled>
-        <button id="deadman" disabled>Hold to drive manually</button><p class="instruction">Manual takeover cancels autonomy. Release to stop. Autonomous driving never resumes by itself.</p>
+        <div id="manual-control" data-ready="false" aria-label="WASD manual controls">
+          <div class="drive-keys" aria-label="W forward, S brake and reverse, A left, D right">
+            <div class="drive-key forward"><button type="button" id="key-w" aria-label="Forward (W)" aria-pressed="false" disabled>W</button><span>Forward</span></div>
+            <div class="drive-key"><button type="button" id="key-a" aria-label="Left (A)" aria-pressed="false" disabled>A</button><span>Left</span></div>
+            <div class="drive-key"><button type="button" id="key-s" aria-label="Brake or reverse (S)" aria-pressed="false" disabled>S</button><span>Brake / reverse</span></div>
+            <div class="drive-key"><button type="button" id="key-d" aria-label="Right (D)" aria-pressed="false" disabled>D</button><span>Right</span></div>
+          </div>
+          <label class="range-label" for="throttle">Drive request <output id="throttle-value">0 PWM</output></label><div class="axis-meter"><meter id="throttle" min="-255" max="255" value="0">0 PWM</meter><span id="throttle-fill" class="axis-fill"></span></div>
+          <label class="range-label" for="steer">Steering request <output id="steer-value">0°</output></label><div class="axis-meter"><meter id="steer" min="-10" max="10" value="0">0°</meter><span id="steer-fill" class="axis-fill"></span></div>
+        </div>
+        <div class="ramp-settings">
+          <label for="drive-rate">Drive ramp <span>% / second</span></label><input id="drive-rate" type="number" min="1" max="1000" step="any" value="100" inputmode="decimal" aria-describedby="drive-rate-help rate-error"><small id="drive-rate-help">0 to full in 1 second</small>
+          <label for="steering-rate">Steering ramp <span>% / second</span></label><input id="steering-rate" type="number" min="1" max="1000" step="any" value="250" inputmode="decimal" aria-describedby="steering-rate-help rate-error"><small id="steering-rate-help">Center to full in 0.4 seconds</small>
+          <p id="rate-error" role="status"></p>
+        </div>
+        <p class="instruction">Arm, then use WASD or hold a direction button. Manual input window: 300 ms; lost-link watchdog: 500 ms. Hold to ramp up; release to ramp toward zero. Opposite keys ramp through zero. Clicking a field pauses keyboard input. Leaving this window stops and disarms.</p>
         <p id="stop-behavior" class="instruction">Stop behavior awaiting telemetry.</p>
+        <details class="control-delivery" open><summary>Control delivery</summary><p id="control-delivery" role="status">Waiting for phone telemetry.</p><button type="button" id="save-control-report">Save control report</button><p class="instruction">Records recent requests and phone status. New phone builds also report sent mode and ESP command acknowledgement. These do not measure motor-terminal voltage.</p></details>
       </aside>
     </section>
     <section class="management" aria-label="Planning and artifact management">

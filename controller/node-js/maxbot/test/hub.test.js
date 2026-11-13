@@ -36,3 +36,9 @@ test('disconnect signals stop; NaN/out of range manual input rejected', () => {
   assert.equal(robot.messages.length, n); hub.detach(operator); assert.equal(robot.messages.at(-1).type, 'operator_left')
 })
 test('Java and node HMAC match published vector', () => assert.equal(sign(key, '1|boot|session|1|1200|100|DRIVE|1500|30'), '85c23b71e3ec7b41613deca25f323f8d7de5909138c16fda4dab7fac4ab9e2f8'))
+
+test('authenticated phone which never publishes telemetry cannot occupy its role forever', () => {
+  let now=1000;const hub=new Hub(key,()=>now);const robot=auth(hub,'robot');
+  now+=1501;hub.tick();assert.equal(hub.robot,null);assert.equal(robot.closed.reason,'Phone registration expired');
+  const replacement=auth(hub,'robot');assert.equal(hub.robot,replacement);
+})

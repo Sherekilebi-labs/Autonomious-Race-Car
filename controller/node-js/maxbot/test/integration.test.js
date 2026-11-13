@@ -20,6 +20,7 @@ test('HTTP + actual WebSocket pairing, telemetry, stop and disconnect path', asy
   let robot, operator
   try {
     const home = await fetch(`http://127.0.0.1:${port}/`); assert.equal(home.status, 200); assert.match(await home.text(), /Emergency stop/)
+    const ramp = await fetch(`http://127.0.0.1:${port}/manual-control.js`); assert.equal(ramp.status, 200); assert.match(await ramp.text(), /class ManualRamp/)
     assert.equal((await fetch(`http://127.0.0.1:${port}/../server.js`)).status, 404)
     robot = await connect(port, 'robot')
     const joined = next(robot); operator = await connect(port, 'operator'); assert.equal((await joined).type, 'operator_joined')

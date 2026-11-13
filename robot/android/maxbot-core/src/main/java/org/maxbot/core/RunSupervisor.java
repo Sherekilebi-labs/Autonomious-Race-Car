@@ -101,7 +101,7 @@ public final class RunSupervisor {
   private double steering, battery, manualSteering;
   private int manualPwm, nearest, passed;
   private boolean tracking, modelReady, linkReady, verified, deviceArmed;
-  private String fault = "Disarmed; arm explicitly";
+  private String fault = "Disarmed; arm explicitly",deviceFault="";
   private int verificationFrames;
 
   public RunSupervisor(Calibration c, Controller controller) {
@@ -158,7 +158,8 @@ public final class RunSupervisor {
     this.deviceArmed = deviceArmed;
     if (!Double.isFinite(angle) || (c.power.batteryMonitoring && !Double.isFinite(volts)))
       stop("Invalid vehicle telemetry");
-    if (deviceFault != null && !deviceFault.isEmpty()) stop("ESP32: " + deviceFault);
+    this.deviceFault=deviceFault==null?"":deviceFault;
+    if (!this.deviceFault.isEmpty()) stop("ESP32: " + this.deviceFault);
     if (c.power.batteryMonitoring && c.power.stopV != null && volts < c.power.stopV)
       stop("Low battery");
     if (moving() && !deviceArmed) stop("ESP32 is not armed");
@@ -261,13 +262,14 @@ public final class RunSupervisor {
     return true;
   }
 
-  public synchronized boolean manual(double angle,int pwm,boolean deadman,long now){return manual(angle,pwm,deadman,now,now+100_000_000L);}
+  public synchronized boolean manual(double angle,int pwm,boolean deadman,long now){return manual(angle,pwm,deadman,now,now+ManualControl.INPUT_MS*1_000_000L);}
   public synchronized boolean manual(double angle, int pwm, boolean deadman, long now,long deadline) {
-    if(deadline<=now||deadline>now+100_000_000L){stop("Original manual intent expired/invalid");return false;}
+    if(deadline<=now){stop("Manual neutral: waiting for fresh input");return false;}
+    if(deadline>now+ManualControl.INPUT_MS*1_000_000L){stop("Invalid manual deadline");return false;}
     if(mode!=Mode.MANUAL)authorityRevision++;
     manualDeadline=deadline;
     if (!deadman) {
-      stop("Manual deadman released");
+      stop("Manual neutral: controls released");
       return false;
     }
     if (!preflight(now, false) || !Double.isFinite(angle) || pwm < -255 || pwm > 255) return false;
@@ -318,6 +320,7 @@ public final class RunSupervisor {
       fault = "Validated cone model and installed policy required";
       return false;
     }
+    if (!deviceFault.isEmpty()) {fault="ESP32: "+deviceFault;return false;}
     if (!deviceArmed) {
       fault = "Arm the ESP32 explicitly before starting";
       return false;
@@ -341,8 +344,8 @@ public final class RunSupervisor {
                 && battery >= c.power.stopV);
     return (!autonomous || (tracking && pose != null && now>=pose.timeNs && now - pose.timeNs < 100_000_000L && now>=imuNs && now-imuNs<50_000_000L))
         && linkReady
-        && now - supervisorNs < c.limits.supervisorMs * 1_000_000L
-        && now - telemetryNs < 150_000_000L
+        && now - supervisorNs < (autonomous?c.limits.supervisorMs:ManualControl.LINK_MS) * 1_000_000L
+        && now - telemetryNs < (autonomous?150:ManualControl.LINK_MS)*1_000_000L
         && batteryOk;
   }
 
@@ -359,10 +362,10 @@ public final class RunSupervisor {
     }
     if (mode == Mode.MANUAL) {
       if (now >= manualDeadline) {
-        stop("Manual command expired");
+        stop("Manual neutral: waiting for fresh input");
         return new Output("STOP", 0, 0);
       }
-      return new Output("DRIVE_MANUAL", manualSteering, manualPwm,manualDeadline,manualNs,0);
+      return new Output("DRIVE_MANUAL", manualSteering, manualPwm,manualDeadline,manualNs,0,now);
     }
     double speedLimit =
         mode == Mode.RUN && c.commissioning.cleanBaselineRuns >= 20

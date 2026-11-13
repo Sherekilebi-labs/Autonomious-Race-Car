@@ -48,3 +48,12 @@ test('Wi-Fi export bounds, partial offsets, hash and private final file', async 
     await assert.rejects(store.receive({ operation: 'begin', id: '../bad', size: 10, sha256: 'a'.repeat(64) }), /ID/)
   } finally { await store.close(); await fs.rm(directory, { recursive: true, force: true }) }
 })
+
+test('simple manual profile accepts 300 ms input but rejects longer and expired intent', () => {
+  let now=1000;const hub=new Hub(key,()=>now),robot=auth(hub,'robot'),operator=auth(hub,'operator');
+  hub.receive(operator,JSON.stringify({type:'heartbeat',seq:1}));let count=robot.messages.length;
+  const m={type:'command',action:'manual',seq:2,steering_deg:5,pwm:120,deadman:true,session_id:hub.peers.get(operator).sessionId,event_id:1,event_ms:now,deadline_ms:now+300};
+  hub.receive(operator,JSON.stringify(m));assert.equal(robot.messages.length,count+1);count=robot.messages.length;
+  m.seq++;m.event_id++;m.deadline_ms=now+301;hub.receive(operator,JSON.stringify(m));assert.equal(robot.messages.length,count);
+  now+=301;m.seq++;m.event_id++;m.deadline_ms=1300;hub.receive(operator,JSON.stringify(m));assert.equal(robot.messages.length,count);
+})

@@ -9,6 +9,12 @@ int main(){
   assert(!validDeadline(1120,1000,1100)); // validation followed by queue delay cannot renew
   assert(!validDeadline(900,1000,1100));assert(!validDeadline(1000,1000,1101));
   assert(!validDeadline(1000,-1,1090));assert(expired(1100,1100));
+  assert(validCommandDeadline(1000,1000,1300,"DRIVE_MANUAL"));
+  assert(!validCommandDeadline(1000,1000,1301,"DRIVE_MANUAL"));
+  assert(!validCommandDeadline(1000,1000,1300,"DRIVE"));
+  assert(validCommandDeadline(1000,1050,1250,"DRIVE_MANUAL"));
+  assert(!validCommandDeadline(1000,1050,1100,"DRIVE"));
+  assert(!validCommandDeadline(1000,1076,1250,"DRIVE_MANUAL"));
   MotionOrder order;assert(!order.accept(0,1,true));assert(order.accept(0,1,false));
   assert(order.accept(0,2,true));assert(!order.accept(0,2,true));assert(!order.accept(1,3,true));
   assert(order.accept(1,3,false));assert(!order.accept(0,4,true));assert(order.accept(1,4,true));
