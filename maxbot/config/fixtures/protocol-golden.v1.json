@@ -1,0 +1,9 @@
+{
+  "synthetic": true,
+  "key": "synthetic-contract-key-never-deploy",
+  "canonicalMotion": "2|0123456789abcdef|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|3|42|1000|1080|DRIVE|12000|120|99|88|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "motionMac": "5e5eb83e079bf6e90192527c7ccee3e3bb1ebbc1ea2d8d600d79d163dbf88d67",
+  "operatorKey": "262fc5933ce0a05a5e8f5d7e202c7c464186e814a184c1cd6542f5ae4a4b2c00",
+  "canonicalStop": "S|0123456789abcdef|cccccccccccccccccccccccccccccccc",
+  "stopMac": "03a0ca4db9fb4795cd5ae75361666bc6c991b9b8917b5191ca153f1378b9b124"
+}

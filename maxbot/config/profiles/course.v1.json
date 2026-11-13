@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "frameId": "launch-rear-axle-v1",
+  "mapEpoch": "prior-only",
+  "observed": false,
+  "coneDiameterM": 0.2,
+  "coneHeightM": 0.15,
+  "edgeGapM": 0.5,
+  "launchBumperGapM": 1.0,
+  "clearanceM": 0.15,
+  "sides": [
+    -1,
+    1,
+    -1,
+    1
+  ],
+  "floorBoundsM": null,
+  "cones": [
+    {
+      "id": "1",
+      "x": 1.31194,
+      "y": 0,
+      "observed": false,
+      "errorBoundM": null
+    },
+    {
+      "id": "2",
+      "x": 2.01194,
+      "y": 0,
+      "observed": false,
+      "errorBoundM": null
+    },
+    {
+      "id": "3",
+      "x": 2.71194,
+      "y": 0,
+      "observed": false,
+      "errorBoundM": null
+    },
+    {
+      "id": "4",
+      "x": 3.41194,
+      "y": 0,
+      "observed": false,
+      "errorBoundM": null
+    }
+  ]
+}

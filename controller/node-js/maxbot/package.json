@@ -1,0 +1,8 @@
+{
+  "name": "maxbot-console",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": { "start": "node server.js", "test": "node --test test/*.test.js" },
+  "dependencies": { "ws": "8.22.1" },
+  "engines": { "node": ">=20" }
+}

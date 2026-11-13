@@ -1,0 +1,13 @@
+# Separate Python 3.10/3.11 environment on the training machine; do not mix with MPC codegen.
+# Clone ultralytics/yolov5 --branch v7.0, then install this file and its requirements.txt.
+numpy==1.24.3
+scipy==1.10.1
+torch==2.1.2
+torchvision==0.16.2
+tensorflow==2.13.1; sys_platform != 'darwin' or platform_machine != 'arm64'
+tensorflow-macos==2.13.0; sys_platform == 'darwin' and platform_machine == 'arm64'
+opencv-python==4.8.1.78
+Pillow==10.4.0
+PyYAML==6.0.2
+protobuf==4.24.4
+flatbuffers==23.5.26

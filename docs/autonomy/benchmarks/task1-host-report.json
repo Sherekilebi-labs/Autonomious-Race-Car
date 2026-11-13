@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-13",
+  "scope": "host software verification; no hardware movement",
+  "coreAssertions": 2935,
+  "pythonDefault": {
+    "passed": 26,
+    "skippedOptionalMpc": 1
+  },
+  "pythonOptionalMpcExistingEnvironment": "passed",
+  "nodeTests": {
+    "passed": 11,
+    "failed": 0
+  },
+  "nativeImageTests": "passed, independent of MPC",
+  "calibrationAndDeadlineTests": "passed",
+  "nativeMpcComparison": {
+    "pathSamples": 46,
+    "worstObservedHostSolveMs": 0.611125,
+    "pixelBenchmark": false
+  },
+  "android": {
+    "assembleDebug": "passed",
+    "lintDebug": "passed",
+    "verifyCore": "passed",
+    "lint": {
+      "Error": 0,
+      "Warning": 10,
+      "Fatal": 0
+    }
+  },
+  "esp": {
+    "fqbn": "esp32:esp32:esp32",
+    "flashBytes": 957776,
+    "ramBytes": 46588,
+    "compiled": true,
+    "flashed": false,
+    "compilerFlashUsageBytes": 957635
+  },
+  "planner": {
+    "wideSyntheticFixture": "feasible, independently validated",
+    "nominalCoursePhysicalFeasibility": null
+  },
+  "browser": {
+    "widths": [
+      1440,
+      390
+    ],
+    "overflow": false,
+    "javascriptExceptions": 0,
+    "focusedDeadmanRelease": "passed",
+    "artifactOperationSerialization": "passed"
+  },
+  "deviceBenchmark": {
+    "durationS": 0,
+    "samples": 0,
+    "captureToPwmP50Ms": null,
+    "captureToPwmP95Ms": null,
+    "captureToPwmP99Ms": null,
+    "steeringOnsetMs": null,
+    "steeringSettlingMs": null,
+    "tractionPhysicalLatencyMs": null,
+    "clockUncertaintyMs": null,
+    "thermalResults": null,
+    "p95Under100MsProven": false
+  },
+  "realConeWeightsAvailable": false,
+  "autonomyCommissioned": false,
+  "firmwareSourceId": "02676c1ae13a9a574d335ba50442dc965ab867b11187910db2493793057a381b",
+  "calibrationId": "210b9c6c3489ffac1a75e66182cf207d60b6042937fac9dc7cd534210accd687"
+}

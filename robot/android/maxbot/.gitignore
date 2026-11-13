@@ -1,0 +1,2 @@
+# Native build instructions are source, unlike upstream model label text files.
+!CMakeLists.txt

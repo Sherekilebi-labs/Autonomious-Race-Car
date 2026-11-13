@@ -1,0 +1,16 @@
+# MaxBot contracts v1 / motion v2
+
+SI units internally; explicit degrees and logical PWM only at actuators. Rear axle x-forward/y-left/z-up; positive yaw/steering left. Course frame is frozen, named and epoch-bound. JSON schemas are closed; finite numbers only, no duplicate keys, bounded arrays/strings. Nanosecond timestamps and source identifiers are unsigned decimal strings (never JavaScript numbers). Wire millisecond counters and sequences are integers in [0, 2^53−1]. Reject missing, additional, nonfinite or unsupported values before activation.
+
+Motion HMAC-SHA256 (UTF-8 key/text, lowercase hex digest):
+`2|boot|session|epoch|seq|issued_ms|expires_ms|mode|steering_mdeg|pwm|source_state|source_frame|calibration_id`
+
+All fields are signed, base-10 integers without padding; tokens contain no `|`. Absolute expiry is in the current ESP boot's monotonic milliseconds, ≤100 ms after issuance. Clock uncertainty is subtracted at the sender. Validation never extends expiry; the motor task checks it again on application and every tick. New source output is required to extend source validity. Epoch advancement clears queued motion and applies zero before subsequent motion. Only the owning phone may reset, explicitly stopped; reset leaves disarmed. Reboot invalidates clock/session/reference state.
+
+Operator role key is `HMAC(pairingKey, "operator-stop-key-v1")`, represented as lowercase ASCII hex. Stop canonical text is `S|boot|request_id` with a 32-hex request ID: 16 hex digits of boot-local issued milliseconds followed by 16 random hex digits. The ESP rejects IDs older than 5 s or over 20 ms in the future; a 32-entry replay cache handles duplicates. Applied acknowledgement is `SA|boot|request_id|applied_ms`. Stop has its own UDP port 4243 and replay cache; it never changes the motion session, telemetry peer, epoch or grant arm/reset authority. A duplicate stop may be acknowledged again but cannot clear the latch.
+
+Artifact identity uses SHA-256 of recursively lexicographically sorted JSON keys, UTF-8, compact delimiters, finite numbers only. To avoid cross-language floating-point formatting differences, authoritative artifacts are hashed as the exact staged canonical UTF-8 bytes and retain those bytes; consumers do not reserialize to verify. A reference's `referenceId` hashes the canonical document with that field omitted. Geometry identity is separate from actuator identity. Existing actuator hash serialization is preserved to avoid changing deployed calibration.
+
+Golden fixtures are synthetic/nondeployable and contain no private key. Prior cone positions, residual scatter and synthetic replay never constitute measured accuracy or readiness. Null empirical bounds block live freezing/activation.
+
+Handshake reply canonical text is `H|boot|time_ms|nonce|calibration_id|rx_ms|tx_ms|sender_ms|owner_epoch|owner_seq|firmware_source_id`. A new phone session may bind only through explicit RESET while the motor snapshot is stopped/disarmed, with monotonic boot-local epoch/sequence advancement. Applied command text is `A|boot|session|seq|epoch|rx_ms|validated_ms|applied_ms|expires_ms|pwm`; local protection records append `|reason`. Geometry artifacts may change phone-side geometry while keeping the actuator identity fixed; changing geometry invalidates the map/reference and resets the camera anchor.

@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "maxbot:vehicle-state:1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "timestampNs": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,18})$"
+    },
+    "clockDomain": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,96}$"
+    },
+    "stateId": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,18})$"
+    },
+    "frameId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,96}$"
+    },
+    "mapEpoch": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,96}$"
+    },
+    "pose": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "yaw": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "yaw"
+      ]
+    },
+    "speedMps": {
+      "type": "number"
+    },
+    "yawRateRadS": {
+      "type": "number"
+    },
+    "accelerationMps2": {
+      "type": "number"
+    },
+    "actualSteeringRad": {
+      "type": "number"
+    },
+    "vioId": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,18})$"
+    },
+    "imuId": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,18})$"
+    },
+    "predictionS": {
+      "type": "number"
+    },
+    "positionErrorM": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "headingErrorRad": {
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "timestampNs",
+    "clockDomain",
+    "stateId",
+    "frameId",
+    "mapEpoch",
+    "pose",
+    "speedMps",
+    "yawRateRadS",
+    "accelerationMps2",
+    "actualSteeringRad",
+    "vioId",
+    "imuId",
+    "predictionS",
+    "positionErrorM",
+    "headingErrorRad"
+  ]
+}

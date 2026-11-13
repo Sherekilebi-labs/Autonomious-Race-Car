@@ -1,0 +1,73 @@
+{
+  "recordedOn": "2026-11-12",
+  "source": "Four user-supplied Tracker screenshots in the project conversation. Image 4 supersedes the earlier asymmetric phone placement; original Tracker project and image files are not stored in the repository.",
+  "units": "meters",
+  "referenceFrame": "Rear-axle center; forward positive, left positive, up positive.",
+  "measurements": {
+    "wheelbaseM": {
+      "value": 0.173,
+      "sourceImage": 1,
+      "annotation": "0.173 m between front and rear wheel centers",
+      "supersedesM": 0.1685
+    },
+    "frontOverhangM": {
+      "value": 0.03894,
+      "sourceImage": 1,
+      "annotation": "3.894E-2 m from front axle to front end"
+    },
+    "cameraHeightM": {
+      "value": 0.09924,
+      "sourceImage": 2,
+      "annotation": "9.924E-2 m from floor to camera sensor/lens"
+    },
+    "cameraDistanceBehindFrontM": {
+      "value": 0.151,
+      "sourceImage": 2,
+      "annotation": "0.151 m horizontal distance from front end to camera sensor/lens"
+    },
+    "trackWidthM": {
+      "value": 0.127,
+      "sourceImage": 3,
+      "annotation": "0.127 m between left and right front tire centers",
+      "usage": "Descriptive metadata only; not full outside width, rear track width, or a swept-steering envelope."
+    },
+    "widthM": {
+      "value": 0.144,
+      "sourceImage": 4,
+      "annotation": "0.144 m overall width with the phone moved to a symmetric lateral position, as confirmed by the user",
+      "usage": "Centered collision rectangle with 0.072 m half-width; distinct from the 0.127 m tire-center spacing."
+    },
+    "cameraLeftM": {
+      "value": 0.0509,
+      "sourceImage": 4,
+      "annotation": "5.090E-2 m from the longitudinal car centerline to the camera sensor/lens",
+      "sign": "Positive left: the front bumper points to image left, so the lower side of this top-view image is the car's left. The lens lies on that lower side.",
+      "usage": "Lens offset, not phone-center offset; centering the phone does not center its lens."
+    },
+    "rearOverhangM": {
+      "value": 0.055,
+      "source": "User confirmation accepted in docs/autonomy/implementation-plan.md, 2026-11-13"
+    }
+  },
+  "derived": {
+    "cameraForwardM": {
+      "value": 0.06094,
+      "formula": "wheelbaseM + frontOverhangM - cameraDistanceBehindFrontM",
+      "calculation": "0.173 + 0.03894 - 0.151"
+    }
+  },
+  "unconfirmed": {
+    "cameraPitchDownDeg": "Lens optical-axis downward tilt relative to the floor; the phone outline alone does not establish calibrated optical-axis alignment.",
+    "cameraYawLeftDeg": "Lens optical-axis heading relative to the car, positive left.",
+    "coneFlange": "Verify enclosing collision footprint, including any square flange beyond the confirmed 200 mm diameter."
+  },
+  "notes": [
+    "Values are transcribed from the displayed Tracker labels, not inferred from unlabeled pixel distances.",
+    "The camera sensor reference is the lens position identified by the user, not the phone center or phone top edge.",
+    "The derivation treats 0.151 m as a horizontal rearward distance from the same front-end reference used for front overhang, as described by the user.",
+    "For image 4, the user moved the phone to a symmetric lateral position without changing its front-end distance; the 0.151 m setback and derived 0.06094 m forward offset are retained.",
+    "Camera height remains the earlier 0.09924 m measurement; image 4 is a top view and does not independently remeasure height or optical-axis pitch/yaw.",
+    "Displayed digits do not establish physical accuracy. Perspective, reference-plane differences, lens distortion and scale calibration remain measurement uncertainty.",
+    "No commissioning flag is changed by these geometry measurements."
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "reviewed": false,
+  "provenance": [],
+  "speedPwm": [],
+  "steeringRateRadS": null,
+  "steeringLagS": null,
+  "accelerationMps2": null,
+  "brakingMps2": null,
+  "lateralMps2": null,
+  "vioLagS": null,
+  "applicationDelayS": null,
+  "validSpeedRangeMps": null
+}

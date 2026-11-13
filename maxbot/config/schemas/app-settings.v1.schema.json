@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "calibrationId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "geometryId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "gpu": {
+      "type": "boolean"
+    },
+    "cpuThreads": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4
+    },
+    "videoEnabled": {
+      "type": "boolean"
+    },
+    "recordingEnabled": {
+      "type": "boolean"
+    },
+    "policyHz": {
+      "const": 50
+    },
+    "floorBoundsM": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "number"
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "revision",
+    "calibrationId",
+    "geometryId",
+    "gpu",
+    "cpuThreads",
+    "videoEnabled",
+    "recordingEnabled",
+    "policyHz",
+    "floorBoundsM"
+  ]
+}

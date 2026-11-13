@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "car": {
+    "wheelbaseM": 0.173,
+    "trackWidthM": 0.127,
+    "widthM": 0.144,
+    "frontOverhangM": 0.03894,
+    "rearOverhangM": null
+  },
+  "manual": {
+    "enabled": true,
+    "maxPwm": 255,
+    "reversePauseMs": 300
+  },
+  "steering": {
+    "leftDeg": 25,
+    "rightDeg": -25,
+    "travelTimeS": null,
+    "deadbandDeg": null,
+    "adc": null,
+    "degrees": null,
+    "kp": null,
+    "ki": null,
+    "kd": null,
+    "maxPwm": null
+  },
+  "camera": {
+    "forwardM": 0.06094,
+    "leftM": 0.0509,
+    "heightM": 0.09924,
+    "pitchDownDeg": null,
+    "yawLeftDeg": null,
+    "streamId": null,
+    "sensorToCarRotation": null,
+    "gyroBiasRadS": null,
+    "imuLeverArmM": null,
+    "positionErrorM": null,
+    "headingErrorRad": null
+  },
+  "cones": {
+    "heightM": 0.15,
+    "baseDiameterM": 0.2,
+    "count": 4
+  },
+  "power": {
+    "batteryMonitoring": false,
+    "packCells": 3,
+    "packMaxV": 12.6,
+    "pwmReferenceMaxV": 8.4,
+    "manualCheckTargetV": 12.0,
+    "senseSource": "disabled",
+    "dividerRatio": null,
+    "adcReferenceMv": null,
+    "adcOffsetMv": null,
+    "fullV": null,
+    "warningV": null,
+    "stopV": null
+  },
+  "limits": {
+    "scoutSpeedMps": 0.2,
+    "maxSpeedMps": null,
+    "accelerationMps2": null,
+    "brakingMps2": null,
+    "lateralMps2": null,
+    "pwmPerMps": null,
+    "tractionMinPwm": null,
+    "launchClearM": 1.0,
+    "finishClearM": null,
+    "lateralSpaceM": null,
+    "clearanceM": 0.15,
+    "commandTtlMs": 100,
+    "watchdogMs": 150,
+    "supervisorMs": 500
+  },
+  "commissioning": {
+    "steeringMeasured": false,
+    "brakingTested": false,
+    "powerVerified": false,
+    "floorVerified": false,
+    "cleanBaselineRuns": 0
+  },
+  "network": {
+    "transport": "wifi",
+    "espHost": "",
+    "espPort": 4242,
+    "dashboardUrl": "",
+    "pairingKey": "",
+    "baud": 460800
+  },
+  "hardware": {
+    "driveForwardPin": 4,
+    "driveReversePin": 16,
+    "steerForwardPin": 22,
+    "steerReversePin": 23,
+    "steerPotPin": 35,
+    "batteryPin": null,
+    "physicalStopPin": null,
+    "steerPolarity": null,
+    "drivePolarity": null,
+    "driveBrakeVerified": false,
+    "wifiSsid": "",
+    "wifiMode": "station",
+    "wifiPassword": ""
+  }
+}

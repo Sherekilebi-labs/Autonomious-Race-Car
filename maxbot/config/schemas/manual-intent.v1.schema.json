@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "maxbot:manual-intent:1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,96}$"
+    },
+    "eventId": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "eventTimeMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "deadlineMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "deadman": {
+      "type": "boolean"
+    },
+    "steeringDeg": {
+      "type": "number"
+    },
+    "pwm": {
+      "type": "integer",
+      "minimum": -255,
+      "maximum": 255
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "sessionId",
+    "eventId",
+    "eventTimeMs",
+    "deadlineMs",
+    "deadman",
+    "steeringDeg",
+    "pwm"
+  ]
+}

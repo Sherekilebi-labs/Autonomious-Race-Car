@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "family": {
+      "enum": [
+        "yolov5n",
+        "yolo26n"
+      ]
+    },
+    "exporterVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "decoder": {
+      "enum": [
+        "yolov5_xywh_objectness",
+        "end_to_end_xyxy_score_class"
+      ]
+    },
+    "inputType": {
+      "enum": [
+        "FLOAT32",
+        "INT8",
+        "UINT8"
+      ]
+    },
+    "outputType": {
+      "enum": [
+        "FLOAT32",
+        "INT8",
+        "UINT8"
+      ]
+    },
+    "normalization": {
+      "const": "zero_to_one"
+    },
+    "coordinates": {
+      "enum": [
+        "normalized",
+        "input_pixels"
+      ]
+    },
+    "orientation": {
+      "const": "sensor_cpu_unrotated_letterbox"
+    },
+    "inputShape": {
+      "const": [
+        1,
+        320,
+        320,
+        3
+      ]
+    },
+    "outputShape": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10000
+      }
+    },
+    "classes": {
+      "const": [
+        "cone"
+      ]
+    },
+    "nmsRequired": {
+      "type": "boolean"
+    },
+    "inputScale": {
+      "type": "number",
+      "minimum": 0
+    },
+    "outputScale": {
+      "type": "number",
+      "minimum": 0
+    },
+    "inputZero": {
+      "type": "integer",
+      "minimum": -128,
+      "maximum": 255
+    },
+    "outputZero": {
+      "type": "integer",
+      "minimum": -128,
+      "maximum": 255
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "realConeValidated": {
+          "type": "boolean"
+        },
+        "datasetId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "reportSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coneRecall": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "falsePositivesPerFrame": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "centerErrorP95M": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "realConeValidated",
+        "datasetId",
+        "reportSha256",
+        "frames",
+        "coneRecall",
+        "falsePositivesPerFrame",
+        "centerErrorP95M"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "sha256",
+    "family",
+    "exporterVersion",
+    "decoder",
+    "inputType",
+    "outputType",
+    "normalization",
+    "coordinates",
+    "orientation",
+    "inputShape",
+    "outputShape",
+    "classes",
+    "nmsRequired",
+    "inputScale",
+    "outputScale",
+    "inputZero",
+    "outputZero",
+    "evaluation"
+  ]
+}

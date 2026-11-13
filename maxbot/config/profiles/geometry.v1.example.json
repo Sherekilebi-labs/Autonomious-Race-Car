@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "actuatorId": "0000000000000000000000000000000000000000000000000000000000000000",
+  "provenance": [
+    "EXAMPLE: replace actuatorId with your matching private calibration identity; fill camera values only from measurements"
+  ],
+  "car": {
+    "wheelbaseM": 0.173,
+    "frontOverhangM": 0.03894,
+    "trackWidthM": 0.127,
+    "widthM": 0.144,
+    "rearOverhangM": 0.055
+  },
+  "camera": {
+    "heightM": 0.09924,
+    "forwardM": 0.06094,
+    "leftM": 0.0509,
+    "pitchDownDeg": null,
+    "yawLeftDeg": null,
+    "positionErrorM": null,
+    "headingErrorRad": null,
+    "streamId": null,
+    "sensorToCarRotation": null,
+    "gyroBiasRadS": null,
+    "imuLeverArmM": null
+  },
+  "cones": {
+    "heightM": 0.15,
+    "baseDiameterM": 0.2,
+    "count": 4
+  }
+}

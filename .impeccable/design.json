@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-05T00:00:00+04:00",
+  "title": "MaxBot console",
+  "extensions": {
+    "focus": { "outline": "3px solid #0064b2", "offset": "3px" },
+    "motion": [{ "name": "button", "value": "background .12s ease-out", "purpose": "Control state changes; disabled for reduced motion" }],
+    "breakpoints": [{ "name": "mobile", "value": "650px" }, { "name": "compact", "value": "900px" }]
+  },
+  "components": [],
+  "narrative": { "overview": "Local operating console with explicit stale and unavailable states.", "dos": ["Keep emergency stop visible", "Distinguish estimated speed from steering feedback"], "donts": ["Do not fabricate live telemetry"] }
+}

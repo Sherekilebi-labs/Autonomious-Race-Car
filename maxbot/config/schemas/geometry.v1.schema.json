@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "actuatorId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "provenance": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "car": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "wheelbaseM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "widthM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "frontOverhangM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "rearOverhangM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "trackWidthM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "wheelbaseM",
+        "widthM",
+        "frontOverhangM",
+        "rearOverhangM",
+        "trackWidthM"
+      ]
+    },
+    "camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "heightM": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "forwardM": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "leftM": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "pitchDownDeg": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "yawLeftDeg": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "positionErrorM": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "headingErrorRad": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "streamId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sensorToCarRotation": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "minItems": 9,
+          "maxItems": 9,
+          "items": {
+            "type": "number"
+          }
+        },
+        "gyroBiasRadS": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number"
+          }
+        },
+        "imuLeverArmM": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number"
+          }
+        }
+      },
+      "required": [
+        "heightM",
+        "forwardM",
+        "leftM",
+        "pitchDownDeg",
+        "yawLeftDeg",
+        "positionErrorM",
+        "headingErrorRad",
+        "streamId",
+        "sensorToCarRotation",
+        "gyroBiasRadS",
+        "imuLeverArmM"
+      ]
+    },
+    "cones": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "const": 4
+        },
+        "heightM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "baseDiameterM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "count",
+        "heightM",
+        "baseDiameterM"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "revision",
+    "actuatorId",
+    "provenance",
+    "car",
+    "camera",
+    "cones"
+  ]
+}

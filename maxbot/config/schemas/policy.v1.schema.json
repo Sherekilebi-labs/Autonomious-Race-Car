@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "policyId": {
+      "const": "cone_slalom_v1"
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "l0": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "kv": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "ldMin": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "ldMax": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "kr": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "kp": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "ki": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "maxCrossTrackM": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.15
+        }
+      },
+      "required": [
+        "l0",
+        "kv",
+        "ldMin",
+        "ldMax",
+        "kr",
+        "kp",
+        "ki",
+        "maxCrossTrackM"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "revision",
+    "policyId",
+    "parameters"
+  ]
+}

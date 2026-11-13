@@ -26,3 +26,25 @@ kotlin-profile
 native
 jdks
 /robot/android/FakeDependency.jar
+
+# MaxBot machine configuration, recordings, generated artifacts and tool caches
+/maxbot.local.json
+/maxbot.runtime.json
+/firmware/maxbot/calibration.generated.h
+/firmware/maxbot/actuator_pwm.generated.h
+/firmware/calibration/actuator_pwm.generated.h
+/robot/android/maxbot/src/main/assets/maxbot/calibration.json
+/robot/android/maxbot/src/main/assets/maxbot/*.tflite
+/robot/android/.gradle-maxbot/
+/robot/android/maxbot/.cxx/
+/robot/android/maxbot/build/
+/robot/android/maxbot-core/build/
+/robot/android/maxbot/src/main/cpp/osqp_generated/
+/.tools/
+/runs/
+/datasets/
+/models/
+/dist/
+__pycache__/
+
+/robot/android/maxbot/src/main/assets/maxbot/contracts/

@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "reviewed": {
+      "const": true
+    },
+    "provenance": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "speedPwm": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 128,
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "steeringRateRadS": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "accelerationMps2": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "brakingMps2": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "lateralMps2": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "steeringLagS": {
+      "type": "number",
+      "minimum": 0
+    },
+    "vioLagS": {
+      "type": "number",
+      "minimum": 0
+    },
+    "applicationDelayS": {
+      "type": "number",
+      "minimum": 0
+    },
+    "validSpeedRangeMps": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "number",
+        "minimum": 0
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "revision",
+    "reviewed",
+    "provenance",
+    "speedPwm",
+    "steeringRateRadS",
+    "accelerationMps2",
+    "brakingMps2",
+    "lateralMps2",
+    "steeringLagS",
+    "vioLagS",
+    "applicationDelayS",
+    "validSpeedRangeMps"
+  ]
+}

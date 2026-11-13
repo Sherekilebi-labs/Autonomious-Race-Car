@@ -1,0 +1,90 @@
+{
+  "car": {
+    "wheelbaseM": 0.173,
+    "frontOverhangM": 0.03894,
+    "trackWidthM": 0.127,
+    "widthM": 0.144,
+    "rearOverhangM": 0.055
+  },
+  "camera": {
+    "forwardM": 0.06094,
+    "heightM": 0.09924,
+    "leftM": 0.0509,
+    "pitchDownDeg": null,
+    "yawLeftDeg": null
+  },
+  "manual": {
+    "enabled": true,
+    "maxPwm": 255,
+    "reversePauseMs": 300
+  },
+  "hardware": {
+    "driveForwardPin": 4,
+    "driveReversePin": 16,
+    "steerForwardPin": 22,
+    "steerReversePin": 23,
+    "steerPotPin": 35,
+    "batteryPin": null,
+    "physicalStopPin": null,
+    "steerPolarity": 1,
+    "drivePolarity": 1,
+    "driveBrakeVerified": true,
+    "pwmCalibration": {
+      "steeringStartPwm": [
+        110,
+        110
+      ],
+      "tractionStartPwm": [
+        120,
+        120
+      ]
+    }
+  },
+  "steering": {
+    "rightDeg": -26,
+    "leftDeg": 26,
+    "adc": [
+      1158,
+      975,
+      849,
+      785,
+      688,
+      608,
+      461
+    ],
+    "degrees": [
+      -26,
+      -16,
+      -7,
+      0,
+      10,
+      16,
+      26
+    ],
+    "travelTimeS": 0.059999999,
+    "kp": 50,
+    "ki": 3,
+    "kd": 1.3,
+    "maxPwm": 255,
+    "deadbandDeg": 3.5
+  },
+  "power": {
+    "batteryMonitoring": false,
+    "packCells": 3,
+    "packMaxV": 12.6,
+    "pwmReferenceMaxV": 8.4,
+    "manualCheckTargetV": 12.0,
+    "senseSource": "disabled",
+    "dividerRatio": 1.5,
+    "adcReferenceMv": null,
+    "adcOffsetMv": null,
+    "fullV": 12.6,
+    "warningV": 10.5,
+    "stopV": 9.0
+  },
+  "commissioning": {
+    "steeringMeasured": false,
+    "powerVerified": false,
+    "brakingTested": false
+  }
+}
