@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <math.h>
 #include <stdint.h>
+#include <string.h>
 static double clamp(double x,double a,double b){return fmax(a,fmin(b,x));}
 JNIEXPORT void JNICALL Java_org_maxbot_app_ConeDetector_prepare(JNIEnv* env,jclass cls,jobject destination,
     jbyteArray source,jint width,jint height,jint kind,jfloat scale,jint zero){
@@ -42,4 +43,30 @@ JNIEXPORT void JNICALL Java_org_maxbot_app_ArCamera_packPlanes(JNIEnv* env,jclas
   jbyte* out=(*env)->GetByteArrayElements(env,target,0);if(!out)return;int offset=0;
   for(int p=0;p<3;p++){int w=p?width/2:width,h=p?height/2:height;for(int row=0;row<h;row++)for(int col=0;col<w;col++)out[offset++]=input[p][row*rows[p]+col*pixels[p]];}
   (*env)->ReleaseByteArrayElements(env,target,out,0);
+}
+
+
+/* Pack directly into the WebRTC-owned I420 slot. Never pin/copy a Java heap array. */
+JNIEXPORT jboolean JNICALL Java_org_maxbot_app_VideoBridge_packPlanesDirect(JNIEnv* env,jclass cls,
+    jobject dy,jobject du,jobject dv,jobject y,jobject u,jobject v,jint width,jint height,
+    jint yr,jint yp,jint ur,jint up,jint vr,jint vp){
+  (void)cls;
+  if(width<=0||height<=0||width%2||height%2||width>1920||height>1080)return JNI_FALSE;
+  jobject planes[3]={y,u,v},targets[3]={dy,du,dv};int rows[3]={yr,ur,vr},pixels[3]={yp,up,vp};
+  unsigned char *input[3],*output[3];
+  for(int p=0;p<3;p++){
+    int w=p?width/2:width,h=p?height/2:height;
+    input[p]=(*env)->GetDirectBufferAddress(env,planes[p]);output[p]=(*env)->GetDirectBufferAddress(env,targets[p]);
+    if(!input[p]||!output[p]||rows[p]<=0||pixels[p]<=0||
+      (int64_t)(h-1)*rows[p]+(int64_t)(w-1)*pixels[p]>=(*env)->GetDirectBufferCapacity(env,planes[p])||
+      (*env)->GetDirectBufferCapacity(env,targets[p])<(int64_t)w*h)return JNI_FALSE;
+  }
+  for(int p=0;p<3;p++){
+    int w=p?width/2:width,h=p?height/2:height;
+    for(int row=0;row<h;row++){
+      if(pixels[p]==1)memcpy(output[p]+row*w,input[p]+row*rows[p],w);
+      else for(int col=0;col<w;col++)output[p][row*w+col]=input[p][row*rows[p]+col*pixels[p]];
+    }
+  }
+  return JNI_TRUE;
 }

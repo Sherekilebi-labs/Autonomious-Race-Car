@@ -40,7 +40,14 @@ public final class MaxBotActivity extends Activity {
   private FrameFanout fanout;
   private ArCamera camera;
   private ImuRecorder imu;
-  private ConeDetector detector;
+  private volatile ConeDetector detector;
+  private volatile BaselineDetector baseline;
+  private SignalMonitor signals;
+  private CollisionWarningView warningView;
+  private volatile JSONObject warning=new JSONObject();
+  private volatile String baselineStatus="Loading bundled YOLOv5n";
+  private volatile long lastWarningNs;
+  private volatile long baselineLoadStartNs,baselineReadyNs;
   private ArtifactManager artifacts;
   private volatile String dynamicsId="",activeConfigId="",activeModelId="",activePolicyId="";
   private volatile boolean activating;
@@ -82,15 +89,17 @@ public final class MaxBotActivity extends Activity {
     calibration = loadCalibration();
     policy=new SlalomPolicy(new SlalomPolicy.Parameters());
     supervisor=new RunSupervisor(calibration,policy);
+    signals=new SignalMonitor(m->{DashboardLink link=dashboard;return link!=null&&link.sendTrace(m);});
     LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setPadding(24,24,24,24);layout.setBackgroundColor(Color.rgb(247,249,251));
     layout.addView(text("MaxBot · manual control",26));
     status=text("Starting services · disarmed",18);parameters=text("",14);
     layout.addView(status);layout.addView(parameters);
+    warningView=new CollisionWarningView(this);layout.addView(warningView);
     // Keep a live GL surface for ARCore while presenting status indicators only.
     GLSurfaceView preview=new GLSurfaceView(this);layout.addView(preview,new LinearLayout.LayoutParams(1,1));
     setContentView(layout);
     power=(PowerManager)getSystemService(POWER_SERVICE);
-    fanout=new FrameFanout(frame->{if(video!=null&&videoEnabled&&!thermalLimited)video.frame(frame);if(recorder!=null&&!thermalLimited)recorder.frame(frame);});
+    fanout=new FrameFanout(frame->{if(recorder!=null&&!thermalLimited)recorder.frame(frame);});
     camera =
         new ArCamera(
             this,
@@ -101,12 +110,19 @@ public final class MaxBotActivity extends Activity {
               public void localization(Geometry.Pose pose, boolean tracking, String reason) {
                 if(reason.toLowerCase(java.util.Locale.ROOT).contains("reset"))supervisor.invalidateMap(reason);
                 supervisor.localization(pose, tracking);
+                if(signals!=null&&pose!=null)try{signals.record(new JSONObject().put("type","visual_state").put("phone_ns",Long.toString(pose.timeNs)).put("tracking",tracking).put("pose",new JSONArray(new double[]{pose.x,pose.y,pose.yaw,pose.speed})));}catch(Exception ignored){}
                 if(recorder!=null&&pose!=null)try{recorder.event(new JSONObject().put("type","state").put("clock_domain","android_elapsed_realtime").put("state_id",Long.toString(pose.timeNs)).put("vio_id",Long.toString(pose.timeNs)).put("imu_id",Long.toString(imu==null?0:imu.latestGyroNs)).put("time_ns",Long.toString(pose.timeNs)).put("pose",new JSONArray(new double[]{pose.x,pose.y,pose.yaw,pose.speed})).put("position_error_m",calibration.camera.positionErrorM==null?JSONObject.NULL:calibration.camera.positionErrorM).put("heading_error_rad",calibration.camera.headingErrorRad==null?JSONObject.NULL:calibration.camera.headingErrorRad));}catch(Exception ignored){}
                 cameraStatus = tracking ? "Tracking · speed estimated" : reason;
               }
 
+              public void image(android.media.Image image,long timestampNs) {
+                VideoBridge v=video;if(v!=null&&videoEnabled)v.image(image,timestampNs);
+              }
+
+              public boolean needsCpuImage() {return baseline!=null||detector!=null||collection;}
+
               public void frame(LatestFramePool.Slot frame) {
-                fanout.offer(frame);
+                if(collection)fanout.offer(frame);
                 scheduleInference();
               }
             });
@@ -114,6 +130,7 @@ public final class MaxBotActivity extends Activity {
       recorder = new RunRecorder(this);
       recorder.snapshot("manifest.json",sessionManifest());
       imu=new ImuRecorder(this,()->recorder,calibration,(timestamp,rate)->supervisor.imu(timestamp,rate,true));
+      imu.trace(signals::record);
     } catch (IOException e) {
       message("Recording unavailable: " + e.getMessage());
     }
@@ -128,6 +145,7 @@ public final class MaxBotActivity extends Activity {
     control.schedule(this::tick, 0, TimeUnit.NANOSECONDS);
     statusPublisher.scheduleWithFixedDelay(this::publishStatus,0,100,TimeUnit.MILLISECONDS);
     try{artifacts=new ArtifactManager(getFilesDir(),this::prepareArtifacts);inference.execute(()->{try{artifacts.restore();}catch(Exception e){modelStatus="Artifact restore blocked: "+e.getMessage();}});}catch(Exception e){modelStatus="Artifact storage unavailable";}
+    inference.execute(()->{baselineLoadStartNs=SystemClock.elapsedRealtimeNanos();try{baseline=new BaselineDetector(this);baselineReadyNs=SystemClock.elapsedRealtimeNanos();baselineStatus="YOLOv5n COCO · CPU / 2 threads";signals.record(new JSONObject().put("type","baseline_loaded").put("load_start_ns",Long.toString(baselineLoadStartNs)).put("ready_ns",Long.toString(baselineReadyNs)).put("metadata",baseline.provenance));}catch(Exception e){baselineStatus="Vision unavailable: "+e.getMessage();}});
     connect();
   }
 
@@ -218,6 +236,7 @@ public final class MaxBotActivity extends Activity {
               }
 
               public void telemetry(JSONObject m, long now) {
+                if(signals!=null)signals.record(m);
                 if(!"telemetry".equals(m.optString("type"))){if(recorder!=null)recorder.event(m);return;}
                 if(recorder!=null)recorder.actuator(m,now);
                 steeringDeg = m.optInt("steering_mdeg") / 1000.;
@@ -238,6 +257,7 @@ public final class MaxBotActivity extends Activity {
                 calibration.network.pairingKey,
                 new DashboardLink.Listener() {
                   public void disconnected() {
+                    if(signals!=null)signals.abort();
                     supervisor.stop("Dashboard disconnected");
                     if (vehicle != null) vehicle.special("DISARM");
                   }
@@ -248,11 +268,11 @@ public final class MaxBotActivity extends Activity {
                 });
         video =
             new VideoBridge(
-                this,
+                this,calibration.network.pairingKey,
                 m -> {
                   DashboardLink d = dashboard;
                   if (d != null) d.send(m);
-                });
+                },m -> {DashboardLink d=dashboard;if(d!=null)d.receiveRealtime(m);});
       } catch (Exception e) {
         message("Dashboard/video: " + e.getMessage());
       }
@@ -263,6 +283,24 @@ public final class MaxBotActivity extends Activity {
     long now = SystemClock.elapsedRealtimeNanos();
     String type = m.optString("type");
     switch (type) {
+      case "signal_monitor":
+        try{
+          if("start".equals(m.optString("operation"))){
+            if(supervisor.autonomous())throw new IllegalStateException("Use manual mode for signal monitoring");
+            JSONObject metadata=sessionManifest().put("baseline",baseline==null?JSONObject.NULL:baseline.provenance)
+              .put("baseline_status",baselineStatus).put("baseline_load_start_ns",Long.toString(baselineLoadStartNs)).put("baseline_ready_ns",Long.toString(baselineReadyNs))
+              .put("camera",camera==null?JSONObject.NULL:camera.capabilitySnapshot()).put("device",android.os.Build.MODEL)
+              .put("android_version",android.os.Build.VERSION.RELEASE).put("thermal_status",power.getCurrentThermalStatus())
+              .put("display_refresh_hz",getWindowManager().getDefaultDisplay().getRefreshRate())
+              .put("imu_configuration",new JSONObject(gson.toJson(calibration.camera))).put("imu_trace_rates","accel/gyro <=50 Hz; gravity <=10 Hz; raw phone axes and alignment metadata")
+              .put("warning_confidence",CollisionWarning.CONFIDENCE).put("nms_iou",CollisionWarning.NMS_IOU)
+              .put("roi",new JSONArray(new float[]{CollisionWarning.LEFT,CollisionWarning.RIGHT,CollisionWarning.BOTTOM,CollisionWarning.AREA}))
+              .put("manual_input_ms",ManualControl.INPUT_MS).put("manual_link_ms",ManualControl.LINK_MS).put("video_enabled",videoEnabled).put("collection",collection)
+              .put("motor_motion_sensor","none; external motion evidence required").put("warning_endpoint","Android draw callback; display scanout excluded");
+            signals.start(m.getString("monitor_id"),metadata);
+          }else if("stop".equals(m.optString("operation")))signals.stop(m.optString("monitor_id"));
+        }catch(Exception e){try{if(dashboard!=null)dashboard.send(new JSONObject().put("type","signal_monitor_status").put("monitor_id",m.optString("monitor_id")).put("error",e.getMessage()));}catch(Exception ignored){}}
+        break;
       case "artifact":
         if(artifacts==null)return;
         long generation=managementEpoch.get();
@@ -279,10 +317,11 @@ public final class MaxBotActivity extends Activity {
       case "operator_joined":
         runOnUiThread(
             () -> {
-              if (video != null&&videoEnabled) video.start();
+              if (video != null&&videoEnabled) video.start(dashboard==null?"":dashboard.operatorSession());
             });
         break;
       case "operator_left":
+        if(video!=null)video.operatorLeft();
         supervisor.stop("Operator disconnected");
         if (vehicle != null) vehicle.special("DISARM");
         break;
@@ -320,12 +359,17 @@ public final class MaxBotActivity extends Activity {
             if (vehicle != null) vehicle.special("RESET");
             break;
           case "manual":
-            supervisor.manual(
+            boolean manualAccepted=supervisor.manual(
                 m.optDouble("steering_deg", Double.NaN),
                 m.optInt("pwm", 1000),
                 m.optBoolean("deadman"),
                 now,
                 m.optLong("mapped_deadline_ns",now));
+            // Dispatch fresh input now; the periodic loop remains the watchdog/neutral path.
+            RunSupervisor.Output manual=supervisor.tick(now);
+            if(manual.sourceStateNs==0)manual=new RunSupervisor.Output(manual.mode,manual.steeringDeg,manual.pwm,manual.validUntilNs,now,0,manual.producedNs);
+            try{signals.record(new JSONObject().put("type","manual_input").put("packet",m).put("source_state",Long.toString(now)).put("phone_handled_ns",Long.toString(now)).put("phone_decided_ns",SignalMonitor.stamp()).put("output_produced_ns",Long.toString(manual.producedNs)).put("accepted",manualAccepted).put("output_mode",manual.mode).put("output_pwm",manual.pwm).put("fault",supervisor.fault()));}catch(Exception ignored){}
+            if(vehicle!=null)vehicle.send(manual);lastOutput=manual;
             break;
           case "freeze":
             try{supervisor.freezeMap(m.optDouble("error_bound_m",Double.NaN),m.optInt("independent_views",0));if(recorder!=null)recorder.snapshot("course.json",mapJson(supervisor.map()));}catch(Exception e){supervisor.stop(e.getMessage());}
@@ -363,7 +407,8 @@ public final class MaxBotActivity extends Activity {
           LatestFramePool.Slot frame = frames.takeLatest();
           try {
             if (frame == null) return;
-            if (active && detector != null) {
+            if(active&&baseline!=null&&!supervisor.autonomous())runBaseline(frame);
+            if (active && detector != null && supervisor.autonomous()) {
               long start = SystemClock.elapsedRealtimeNanos();
               List<ConeDetector.Detection> result = detector.detect(frame);
               lastInferenceMs = (SystemClock.elapsedRealtimeNanos() - start) / 1e6;
@@ -395,6 +440,42 @@ public final class MaxBotActivity extends Activity {
             if(frames.hasPending()&&!closing)scheduleInference();
           }
         });
+  }
+
+  private void runBaseline(LatestFramePool.Slot frame)throws Exception {
+    BaselineDetector.Result result;
+    try{result=baseline.detect(frame);}catch(Exception e){baselineStatus="Vision inference failed: "+e.getMessage();lastWarningNs=0;signals.record(new JSONObject().put("type","vision_error").put("phone_ns",SignalMonitor.stamp()).put("message",baselineStatus));return;}
+    if(!active||closing||supervisor.autonomous())return;
+    baselineStatus="YOLOv5n COCO · CPU / 2 threads";
+    lastInferenceMs=(result.inferred-result.prepared)/1e6;
+    boolean collision=false;JSONArray boxes=new JSONArray();
+    for(CollisionWarning.Box b:result.boxes){collision|=b.warning();boxes.put(new JSONObject().put("box",new JSONArray(new float[]{b.left,b.top,b.right,b.bottom})).put("class_id",b.classId).put("score",b.score).put("warning",b.warning()));}
+    long decisionNs=SystemClock.elapsedRealtimeNanos();
+    frameAgeMs=(decisionNs-frame.timestampNs)/1e6;
+    String frameId=Long.toString(frame.sensorTimestampNs);
+    long[] counts=frames.counters();
+    JSONObject event=new JSONObject().put("type","vision_frame").put("frame_id",frameId)
+      .put("camera_timestamp_ns",Long.toString(frame.cameraTimestampNs)).put("sensor_timestamp_ns",frameId)
+      .put("android_camera_timestamp_ns",Long.toString(frame.androidCameraTimestampNs)).put("sensor_clock_check","REALTIME source + CPU image equals Android camera timestamp + plausible age")
+      .put("sensor_clock_comparable",frame.sensorClockComparable).put("image_available_ns",Long.toString(frame.timestampNs))
+      .put("image_acquired_ns",Long.toString(frame.imageAcquiredNs)).put("pack_start_ns",Long.toString(frame.packStartNs)).put("published_ns",Long.toString(frame.publishedNs))
+      .put("inference_start_ns",Long.toString(result.start)).put("prepared_ns",Long.toString(result.prepared)).put("inferred_ns",Long.toString(result.inferred)).put("decoded_ns",Long.toString(result.decided)).put("decision_ns",Long.toString(decisionNs))
+      .put("warning",collision).put("detections",boxes).put("frame_pool_published",counts[0]).put("frame_pool_replacements",counts[1]).put("frame_pool_capture_misses",counts[2])
+      .put("thermal_status",power.getCurrentThermalStatus()).put("clock_domain","android_elapsed_realtime");
+    lastWarningNs=decisionNs;
+    JSONObject live=new JSONObject().put("type","collision_warning").put("frame_id",frameId).put("status",collision?"warning":"no_warning_detected")
+      .put("decision_ns",Long.toString(decisionNs)).put("detections",boxes).put("model",baselineStatus).put("advisory",true);
+    DashboardLink link=dashboard;
+    if(link!=null){JSONObject clock=link.reportTimestamp(decisionNs);event.put("host_clock",clock);live.put("host_clock",clock);}
+    signals.record(event);warning=live;
+    if(link!=null)link.sendTrace(live);
+    final boolean detected=collision;
+    runOnUiThread(()->{
+      if(closing||!active||supervisor.autonomous())return;
+      warningView.show(detected?"Collision warning · object ahead":"No warning detected · YOLOv5n",detected?Color.rgb(174,24,41):Color.rgb(24,37,48),drawn->{
+        try{signals.record(new JSONObject().put("type","phone_warning_drawn").put("frame_id",frameId).put("draw_ns",Long.toString(drawn)).put("warning",detected));}catch(Exception ignored){}
+      });
+    });
   }
 
   private void tick() {
@@ -451,6 +532,9 @@ public final class MaxBotActivity extends Activity {
               .put("control_age_ms",lastControlNs==0?JSONObject.NULL:Math.max(0,(now-lastControlNs)/1_000_000.0))
               .put("control_max_gap_ms",maximumControlGapNs/1_000_000.0)
               .put("dashboard_control",dashboard==null?JSONObject.NULL:dashboard.controlTiming())
+              .put("collision_warning",new JSONObject(warning.toString()).put("status",!active||supervisor.autonomous()?"inactive":lastWarningNs==0||now-lastWarningNs>750_000_000L?"unavailable_or_stale":warning.optString("status")))
+              .put("signal_monitor_available",true)
+              .put("stream",video==null?JSONObject.NULL:video.stats(now))
               .put("time_ns",Long.toString(now))
               .put("mode", supervisor.mode().name())
               .put("fault", supervisor.fault())
@@ -497,8 +581,8 @@ public final class MaxBotActivity extends Activity {
               .put("missing", new JSONArray(calibration.missing()));
       CourseMap liveMap=supervisor.map();
       status.put("map_epoch",liveMap==null?JSONObject.NULL:liveMap.mapEpoch()).put("config_id",activeConfigId).put("model_id",activeModelId).put("vehicle_model_id",dynamicsId).put("policy_id","cone_slalom_v1").put("calibration_id",calibration.firmwareCalibrationId);
-      status.put("capabilities",new JSONArray(new String[]{"cone_slalom_v1","yolov5_xywh_objectness","end_to_end_xyxy_score_class","artifacts_v1","reference_v1"}));
-      if(camera!=null)status.put("camera_capabilities",new JSONObject(camera.capabilities.toString()));
+      status.put("capabilities",new JSONArray(new String[]{"cone_slalom_v1","yolov5_xywh_objectness","end_to_end_xyxy_score_class","artifacts_v1","reference_v1","signal_monitor_v1","yolov5n_coco_warning_v1"}));
+      if(camera!=null)status.put("camera_capabilities",camera.capabilitySnapshot());
       if(liveMap!=null){
         JSONObject course=mapJson(liveMap);status.put("course_map",course);
         JSONObject config=new JSONObject(gson.toJson(calibration));config.remove("network");
@@ -557,6 +641,7 @@ public final class MaxBotActivity extends Activity {
       runOnUiThread(
           () -> {
             if (closing) return;
+            if(!active||supervisor.autonomous()||lastWarningNs==0||now-lastWarningNs>750_000_000L)warningView.show(supervisor.autonomous()?"Manual vision warning inactive":"Vision unavailable or stale · "+baselineStatus,Color.rgb(76,96,110),null);
             this.status.setText(
                 supervisor.mode()
                     + " · "
@@ -612,7 +697,7 @@ public final class MaxBotActivity extends Activity {
   }
 
   private JSONObject sessionManifest(){
-    JSONObject m=new JSONObject();try{m.put("schemaVersion",1).put("artifactType","recording_session").put("appVersion","0.4.0-manual").put("calibrationId",calibration.firmwareCalibrationId).put("geometryId",calibration.geometryId).put("policyId","cone_slalom_v1").put("modelId",activeModelId).put("vehicleModelId",dynamicsId).put("configRevision",activeConfigId).put("physicallyValidated",false).put("contactReview","required").put("mapEpoch",supervisor.map()==null?JSONObject.NULL:supervisor.map().mapEpoch()).put("referenceId",supervisor.referenceId()).put("cameraStreamId",camera==null?JSONObject.NULL:camera.streamId);}catch(Exception ignored){}return m;
+    JSONObject m=new JSONObject();try{m.put("schemaVersion",1).put("artifactType","recording_session").put("appVersion","0.6.1-timing-fix").put("calibrationId",calibration.firmwareCalibrationId).put("geometryId",calibration.geometryId).put("policyId","cone_slalom_v1").put("modelId",activeModelId).put("vehicleModelId",dynamicsId).put("configRevision",activeConfigId).put("physicallyValidated",false).put("contactReview","required").put("mapEpoch",supervisor.map()==null?JSONObject.NULL:supervisor.map().mapEpoch()).put("referenceId",supervisor.referenceId()).put("cameraStreamId",camera==null?JSONObject.NULL:camera.streamId);}catch(Exception ignored){}return m;
   }
 
   private void exportRun()throws Exception{
@@ -739,6 +824,7 @@ public final class MaxBotActivity extends Activity {
   @Override
   protected void onDestroy() {
     closing = true;
+    if(signals!=null)signals.close();
     active = false;
     control.shutdownNow();
     statusPublisher.shutdownNow();
@@ -754,6 +840,7 @@ public final class MaxBotActivity extends Activity {
     inference.execute(
         () -> {
           if (detector != null) detector.close();
+          if (baseline != null) baseline.close();
         });
     inference.shutdown();
     files.execute(

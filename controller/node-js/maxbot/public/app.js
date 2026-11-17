@@ -2,6 +2,10 @@
 
 const $ = id => document.getElementById(id)
 let socket, paired = false, robot = false, seq = 0, latest = null, peer = null, candidates = [], held = false, heartbeatTimer, lastTelemetry = 0, sessionId = "", eventId = 0
+let steeringPanel = null, signalPanel = null
+let inputId = 0, inputStamp = { input_id: 0, input_ms: Date.now(), input_perf_ms: performance.now() }
+function noteInput (code, down) { inputStamp = { input_id: ++inputId, input_ms: Date.now(), input_perf_ms: performance.now() }; signalPanel?.record({ type: 'raw_input', code, down, ...inputStamp }) }
+let realtime = null, rtcSigner = null, streamTimer, streamStats = {}, previousVideoStats = null
 const encoder = new TextEncoder()
 const send = m => { if (paired && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ ...m, seq: ++seq })) }
 const command = (action, values = {}) => send({ type: 'command', action, ...values })
@@ -10,6 +14,8 @@ function recordControl (sample) { controlHistory.push({ time_ms: Date.now(), ...
 const modeMoving = () => ['SCOUT', 'RUN', 'MANUAL'].includes(latest?.mode)
 
 function availability () {
+  steeringPanel?.availability(paired)
+  signalPanel?.availability(paired, paired && robot && Date.now() - lastTelemetry < 600, latest)
   const fresh = paired && robot && Date.now() - lastTelemetry < 600
   document.querySelectorAll('[data-action]').forEach(button => {
     const action = button.dataset.action
@@ -40,15 +46,17 @@ async function mac (key, message) {
 $('pair').addEventListener('submit', event => {
   event.preventDefault(); cleanup(); seq = 0
   const key = $('key').value
+  rtcSigner = message => mac(key, message)
   socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/operator`)
   $('pair-status').textContent = 'Pairing…'
   socket.onmessage = async event => {
     try {
       const m = JSON.parse(event.data)
       if (m.type === 'challenge') socket.send(JSON.stringify({ type: 'auth', role: 'operator', mac: await mac(key, `AUTH|operator|${m.nonce}`) }))
-      else if (m.type === 'authenticated') { paired = true; robot = m.robot; sessionId=m.session_id; eventId=0; $('key').value = ''; $('pair-status').textContent = 'Paired. Connect the phone to this computer’s LAN address.'; heartbeatTimer = setInterval(() => { if (!document.hidden) send({ type: 'heartbeat' }) }, 100); send({ type: 'heartbeat' }) }
-      else if (m.type === 'robot_connected') robot = true
-      else if (m.type === 'robot_disconnected') { robot = false; release(); closeVideo() }
+      else if (m.type === 'authenticated') { paired = true; robot = m.robot; sessionId=m.session_id; eventId=0; $('key').value = ''; $('pair-status').textContent = 'Paired. Connect the phone to this computer’s LAN address.'; heartbeatTimer = setInterval(() => { if (!document.hidden) send({ type: 'heartbeat' }) }, 100); send({ type: 'heartbeat' }); send({ type: 'signal_monitor', operation: 'status' }) }
+      else if (m.type === 'signal_monitor_status' || m.type === 'collision_warning') signalPanel?.receive(m)
+      else if (m.type === 'robot_connected') { robot = true; signalPanel?.resetFrames() }
+      else if (m.type === 'robot_disconnected') { signalPanel?.resetFrames(); robot = false; release(); closeVideo() }
       else if (m.type === 'telemetry') { latest = m; lastTelemetry = Date.now(); render(m) }
       else if(m.type === 'export') $('notice').textContent = m.status==='saved' ? `Run saved on Mac: ${m.path}` : `Export: ${m.status}`
       else if (m.type === 'direct_stop') $('direct-stop-status').textContent = `Direct ESP stop: ${m.status}${m.reason ? ' · '+m.reason : ''}`
@@ -57,6 +65,7 @@ $('pair').addEventListener('submit', event => {
         $('artifact-status').textContent = m.message || m.status
         const pending = artifactWaiters.get(m.request_id); if (pending) { clearTimeout(pending.timer); artifactWaiters.delete(m.request_id); if (m.status === 'ok') pending.resolve(m); else pending.reject(new Error(m.message || 'Artifact rejected')) }
       }
+      else if (m.type === 'steering_tuning') steeringPanel?.receive(m)
       else if (m.type === 'rtc') await signal(m)
       availability()
     } catch (error) { $('pair-status').textContent = error.message }
@@ -67,17 +76,27 @@ $('pair').addEventListener('submit', event => {
 
 function cleanup () {
   for(const waiter of artifactWaiters.values()){clearTimeout(waiter.timer);waiter.reject(new Error('Dashboard disconnected; stage a fresh set'))}artifactWaiters.clear();stagedTransaction=null;stagedManifest=null;delete $('activate').dataset.ready
-  release(); clearInterval(heartbeatTimer); paired = false; robot = false
+  signalPanel?.disconnected(); release(); clearInterval(heartbeatTimer); paired = false; robot = false; rtcSigner = null
   if (socket) { socket.onclose = null; socket.close(); socket = null }
   closeVideo(); availability()
 }
-function closeVideo () { if (peer) peer.close(); peer = null; candidates = []; $('video').srcObject = null; $('video-empty').hidden = false; $('video-empty').style.display = 'flex'; $('screenshot').disabled = true }
+function closeVideo () { realtime?.close(); realtime = null; clearInterval(streamTimer); previousVideoStats = null; streamStats = {}; if (peer) peer.close(); peer = null; candidates = []; $('video').srcObject = null; $('video-empty').hidden = false; $('video-empty').style.display = 'flex'; $('screenshot').disabled = true }
 async function signal (m) {
   if (m.kind === 'offer') {
-    if (peer) peer.close()
+    const earlyCandidates = peer ? [] : candidates
+    closeVideo(); candidates = earlyCandidates
     peer = new RTCPeerConnection({ iceServers: [] })
     peer.onicecandidate = event => { if (event.candidate) send({ type: 'rtc', kind: 'candidate', ...event.candidate.toJSON() }) }
-    peer.ontrack = event => { $('video').srcObject = event.streams[0] || new MediaStream([event.track]); $('video-empty').style.display = 'none'; $('screenshot').disabled = false }
+    peer.ondatachannel = event => {
+      if (event.channel.label !== 'maxbot-controls' || !rtcSigner) { event.channel.close(); return }
+      realtime?.close(); realtime = new RealtimeInputs({ session: sessionId, sign: rtcSigner, fallback: send }); realtime.bind(event.channel)
+    }
+    streamTimer = setInterval(sampleStream, 1000)
+    peer.ontrack = event => {
+      // Ask the receiver to display fresh frames without an added playout cushion.
+      try { if ('jitterBufferTarget' in event.receiver) event.receiver.jitterBufferTarget = 0 } catch {}
+      try { if ('playoutDelayHint' in event.receiver) event.receiver.playoutDelayHint = 0 } catch {}
+      $('video').srcObject = event.streams[0] || new MediaStream([event.track]); $('video-empty').style.display = 'none'; $('screenshot').disabled = false }
     await peer.setRemoteDescription({ type: 'offer', sdp: m.sdp })
     for (const ice of candidates) await peer.addIceCandidate(ice)
     candidates = []
@@ -87,6 +106,35 @@ async function signal (m) {
     if (peer?.remoteDescription) await peer.addIceCandidate(ice)
     else if (candidates.length < 64) candidates.push(ice)
   }
+}
+
+async function sampleStream () {
+  const call = peer
+  if (!call || call.connectionState === 'closed') return
+  try {
+    const stats = await call.getStats()
+    if (peer !== call) return
+    let inbound, pair
+    stats.forEach(s => {
+      if (s.type === 'inbound-rtp' && (s.kind === 'video' || s.mediaType === 'video')) inbound = s
+      if (s.type === 'transport' && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId)
+    })
+    const input = realtime?.stats()
+    if (!inbound) { $('stream-status').textContent = `Waiting for video · Inputs: ${input?.transport || 'WebSocket'}`; return }
+    const previous = previousVideoStats?.id === inbound.id ? previousVideoStats : null
+    const delta = field => previous ? inbound[field] - previous[field] : NaN
+    const emitted = delta('jitterBufferEmittedCount'), decoded = delta('framesDecoded'), elapsed = delta('timestamp')
+    streamStats = {
+      width: inbound.frameWidth, height: inbound.frameHeight, fps: inbound.framesPerSecond,
+      bitrate_kbps: elapsed > 0 ? delta('bytesReceived') * 8 / elapsed : null,
+      jitter_buffer_ms: emitted > 0 ? delta('jitterBufferDelay') * 1000 / emitted : null,
+      decode_ms: decoded > 0 ? delta('totalDecodeTime') * 1000 / decoded : null,
+      round_trip_ms: pair?.currentRoundTripTime === undefined ? null : pair.currentRoundTripTime * 1000,
+      frames_dropped: inbound.framesDropped, freezes: inbound.freezeCount
+    }
+    previousVideoStats = inbound
+    $('stream-status').textContent = `${inbound.frameWidth || '—'} × ${inbound.frameHeight || '—'} · ${fixed(inbound.framesPerSecond, 0)} fps · ${fixed(streamStats.bitrate_kbps, 0)} kb/s · Video buffer ${fixed(streamStats.jitter_buffer_ms, 1)} ms · Decode ${fixed(streamStats.decode_ms, 1)} ms · Inputs: ${input?.transport || 'WebSocket'}${input?.round_trip_ms == null ? '' : ' · '+fixed(input.round_trip_ms, 0)+' ms return trip'}`
+  } catch { /* Stats are optional; they never interrupt control. */ }
 }
 
 document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => { release(); command(button.dataset.action) }))
@@ -121,7 +169,9 @@ function paintManual () {
 function manualPacket (active, values = { pwm: 0, steering_deg: 0 }) {
   const now = Date.now()
   recordControl({ source: 'browser', active, ...values })
-  command('manual', { ...values, deadman: active, session_id: sessionId, event_id: ++eventId, event_ms: now, deadline_ms: now + MANUAL_PROFILE.inputMs })
+  const packet = { type: 'command', action: 'manual', ...values, deadman: active, session_id: sessionId, event_id: ++eventId, event_ms: now, deadline_ms: now + MANUAL_PROFILE.inputMs, ...inputStamp, packet_perf_ms: performance.now() }
+  const direct = realtime ? realtime.send(packet) : (send(packet), false)
+  signalPanel?.record({ type: 'manual_packet', packet, direct })
 }
 function release () {
   const wasHeld = held
@@ -132,7 +182,7 @@ function manualStep () {
   const now = performance.now(), elapsed = (now - manualTime) / 1000
   manualTime = now
   if (!manualReady() || !document.hasFocus() || editing(document.activeElement)) { release(); return }
-  if (!ramp.step(driveKeys, elapsed, Number($('drive-rate').value), Number($('steering-rate').value))) { release(); return }
+  if (!ramp.step(driveKeys, elapsed, Number($('drive-rate').value), Number($('steering-rate').value), Math.min(1, MANUAL_PROFILE.driveMinimumPwm / Number($('throttle').max)))) { release(); return }
   const values = paintManual()
   const active = driveKeys.size > 0 || ramp.drive !== 0 || ramp.steering !== 0
   if (active) { held = true; manualPacket(true, values) }
@@ -145,12 +195,12 @@ document.addEventListener('keydown', event => {
   if (!manualReady()) return
   event.preventDefault()
   if (event.repeat) return
-  manualStep(); keyboardKeys.add(code); combineKeys(); paintManual()
+  manualStep(); noteInput(code, true); keyboardKeys.add(code); combineKeys(); paintManual()
 })
 document.addEventListener('keyup', event => {
   const code = keyCode(event)
   if (!controlCodes.has(code)) return
-  if (keyboardKeys.has(code)) { event.preventDefault(); manualStep(); keyboardKeys.delete(code); combineKeys(); paintManual() }
+  if (keyboardKeys.has(code)) { event.preventDefault(); manualStep(); noteInput(code, false); keyboardKeys.delete(code); combineKeys(); paintManual() }
 })
 function combineKeys () {
   driveKeys.clear()
@@ -160,11 +210,11 @@ for (const code of controlCodes) {
   const button = $('key-' + code.slice(-1).toLowerCase())
   function begin (id) {
     if (!manualReady()) return
-    button.focus(); manualStep(); pointerKeys.set(id, code); combineKeys(); paintManual()
+    button.focus(); manualStep(); noteInput(code, true); pointerKeys.set(id, code); combineKeys(); paintManual()
   }
   function end (id) {
     if (!pointerKeys.has(id)) return
-    manualStep(); pointerKeys.delete(id); combineKeys(); paintManual()
+    manualStep(); noteInput(code, false); pointerKeys.delete(id); combineKeys(); paintManual()
   }
   button.addEventListener('pointerdown', event => {
     if (button.disabled || (event.button !== undefined && event.button !== 0)) return
@@ -181,11 +231,12 @@ for (const code of controlCodes) {
   button.addEventListener('blur', () => end('keyboard-' + code))
 }
 document.addEventListener('focusin', event => { if (editing(event.target)) release() })
+function driveRampHelp (rate) { const max = Number($('throttle').max) || 255, min = Math.min(MANUAL_PROFILE.driveMinimumPwm, max); return `${min} to ${max} PWM in ${Number(((max - min) / max * 100 / rate).toFixed(3))} seconds` }
 for (const [id, help, prefix] of [['drive-rate', 'drive-rate-help', '0 to full'], ['steering-rate', 'steering-rate-help', 'Center to full']]) {
   $(id).addEventListener('input', () => {
     const value = Number($(id).value), valid = Number.isFinite(value) && value >= 1 && value <= 1000
     $(id).setAttribute('aria-invalid', String(!valid))
-    $(help).textContent = valid ? `${prefix} in ${Number((100 / value).toFixed(3))} seconds` : 'Enter a rate from 1 to 1000 % / second.'
+    $(help).textContent = valid ? id === 'drive-rate' ? driveRampHelp(value) : `${prefix} in ${Number((100 / value).toFixed(3))} seconds` : 'Enter a rate from 1 to 1000 % / second.'
     $('rate-error').textContent = ['drive-rate','steering-rate'].some(field => $(field).getAttribute('aria-invalid') === 'true') ? 'Keyboard control paused until both rates are valid.' : ''
     if (!valid) release()
   })
@@ -198,17 +249,18 @@ $('collect').addEventListener('change', () => command('collection', { enabled: $
 
 const fixed = (value, places = 2) => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(places) : '—'
 function render (m) {
+  if (m.collision_warning) signalPanel?.warning(m.collision_warning)
   $('mode').textContent = m.mode || 'UNKNOWN'
   const fields = ['mode','armed','manual_armed','manual_input_ms','manual_link_ms','vehicle_connected','mcu_fault','link','fault','pwm','target_steering_deg','steering_deg','clock_uncertainty_ms','mcu_deadline_rejected','mcu_application_loss','timing_application_age_ms','mcu_pwm','wifi_latency_mode','control_age_ms','control_max_gap_ms']
   const delivery = m.vehicle_control || {}
   const vehicleControl = Object.fromEntries(['gate','last_sent_mode','ack_sequence','ack_epoch','pending_zero_sequence','ack_age_ms','ack_pwm'].filter(key => Object.hasOwn(delivery, key)).map(key => [key, delivery[key]]))
   const dashboardTiming = m.dashboard_control || {}
-  const dashboardControl = Object.fromEntries(['clock_uncertainty_ms','last_manual_budget_ms','last_manual_age_ms'].filter(key => Object.hasOwn(dashboardTiming, key)).map(key => [key, dashboardTiming[key]]))
-  recordControl({ source: 'phone', ...Object.fromEntries(fields.filter(key => Object.hasOwn(m, key)).map(key => [key, m[key]])), vehicle_control: vehicleControl, dashboard_control: dashboardControl })
+  const dashboardControl = Object.fromEntries(['transport','clock_uncertainty_ms','last_manual_budget_ms','last_manual_age_ms'].filter(key => Object.hasOwn(dashboardTiming, key)).map(key => [key, dashboardTiming[key]]))
+  recordControl({ source: 'phone', ...Object.fromEntries(fields.filter(key => Object.hasOwn(m, key)).map(key => [key, m[key]])), vehicle_control: vehicleControl, dashboard_control: dashboardControl, stream: m.stream, browser_stream: streamStats, input_transport: realtime?.stats() })
   const uncertainty = m.clock_uncertainty_ms
   const clock = !Object.hasOwn(m, 'clock_uncertainty_ms') ? 'not reported' : uncertainty === null ? 'not synchronized' : `${fixed(uncertainty, 1)} ms`
   const rejected = Number.isInteger(m.mcu_deadline_rejected) ? m.mcu_deadline_rejected : 'not reported'
-  $('control-delivery').textContent = `Phone mode: ${m.mode || 'unknown'}\nPhone output: ${fixed(m.pwm, 0)} PWM / ${fixed(m.target_steering_deg, 1)}°\nVehicle link: ${m.link || 'not reported'}\nWi-Fi mode: ${m.wifi_latency_mode || 'not reported'}\nControl loop maximum gap: ${fixed(m.control_max_gap_ms, 1)} ms\nManual budget at phone: ${fixed(dashboardTiming.last_manual_budget_ms, 1)} ms\nMac clock uncertainty: ${fixed(dashboardTiming.clock_uncertainty_ms, 1)} ms\nESP clock uncertainty: ${clock}\nESP reported PWM: ${fixed(m.mcu_pwm, 0)}\nLast sent mode: ${delivery.last_sent_mode || 'not reported'}\nMotion gate: ${delivery.gate || 'not reported'}\nApplied acknowledgement age: ${fixed(delivery.ack_age_ms, 0)} ms\nESP rejected deadlines: ${rejected}\nStatus: ${m.fault || 'No phone fault reported'}`
+  $('control-delivery').textContent = `Input route: ${dashboardTiming.transport || 'websocket'}\nPhone mode: ${m.mode || 'unknown'}\nPhone output: ${fixed(m.pwm, 0)} PWM / ${fixed(m.target_steering_deg, 1)}°\nVehicle link: ${m.link || 'not reported'}\nWi-Fi mode: ${m.wifi_latency_mode || 'not reported'}\nControl loop maximum gap: ${fixed(m.control_max_gap_ms, 1)} ms\nManual budget at phone: ${fixed(dashboardTiming.last_manual_budget_ms, 1)} ms\nMac clock uncertainty: ${fixed(dashboardTiming.clock_uncertainty_ms, 1)} ms\nESP clock uncertainty: ${clock}\nESP reported PWM: ${fixed(m.mcu_pwm, 0)}\nLast sent mode: ${delivery.last_sent_mode || 'not reported'}\nMotion gate: ${delivery.gate || 'not reported'}\nApplied acknowledgement age: ${fixed(delivery.ack_age_ms, 0)} ms\nESP rejected deadlines: ${rejected}\nStatus: ${m.fault || 'No phone fault reported'}`
 
   $('speed').textContent = `${fixed(m.speed_mps)} m/s`
   $('steering').textContent = `${fixed(m.steering_deg, 1)}° / ${fixed(m.target_steering_deg, 1)}°`
@@ -228,10 +280,10 @@ function render (m) {
   if (Array.isArray(m.steering_limits_deg) && m.steering_limits_deg.length === 2) { $('steer').min = String(m.steering_limits_deg[0]); $('steer').max = String(m.steering_limits_deg[1]) }
   if (Number.isInteger(m.manual_max_pwm) && m.manual_max_pwm >= 1 && m.manual_max_pwm <= 255) {
     $('throttle').min = String(-m.manual_max_pwm); $('throttle').max = String(m.manual_max_pwm)
-    paintManual()
+    paintManual(); $('drive-rate-help').textContent = driveRampHelp(Number($('drive-rate').value))
   }
   $('notice').textContent = m.thermal_limited ? 'Phone warm: optional workload reduced.' : `${m.recording_status || 'Events recording'} · optional drops: ${m.recording_drops || 0}`
-  $('timing').textContent = `Capture → PWM: ${m.capture_pwm_ms ? m.capture_pwm_ms.map(v=>fixed(v,1)).join(' / ')+' ms' : 'Not measured'} · Image available → PWM p50/p95/p99: ${(m.image_available_pwm_ms || []).map(v=>fixed(v,1)).join(' / ') || 'Not measured'} · Policy → PWM: ${(m.policy_pwm_ms || []).map(v=>fixed(v,1)).join(' / ') || 'Not measured'} · Window: ${m.timing_window_samples ?? 0} commands / ${m.image_timing_samples ?? 0} images over ${fixed(m.timing_window_ms,0)} ms · Last application age: ${fixed(m.timing_application_age_ms,0)} ms · Last image timing age: ${fixed(m.image_timing_age_ms,0)} ms · Steering onset p50/p95/p99: ${(m.steering_onset_ms || []).map(v=>fixed(v,1)).join(' / ') || 'Not measured'} ms (n=${m.steering_onset_samples ?? 0}) · Settling: ${(m.steering_settling_ms || []).map(v=>fixed(v,1)).join(' / ') || 'Not measured'} ms (n=${m.steering_settling_samples ?? 0}) · Total samples: ${m.timing_samples ?? 0} · Missing: ${m.timing_missing ?? '—'} · Pending: ${m.timing_pending ?? '—'} · MCU rejected deadlines: ${m.mcu_deadline_rejected ?? '—'} · MCU event loss: ${m.mcu_application_loss ?? '—'} · Applied after deadline: ${m.failed_deadlines ?? '—'} · Clock uncertainty: ${fixed(m.clock_uncertainty_ms,1)} ms`;
+  $('timing').textContent = `Capture → PWM: ${m.capture_pwm_ms ? m.capture_pwm_ms.map(v=>fixed(v,1)).join(' / ')+' ms' : 'Not measured'} · Image available → command consumption p50/p95/p99: ${(m.image_available_pwm_ms || []).map(v=>fixed(v,1)).join(' / ') || 'Not measured'} · Policy → command consumption: ${(m.policy_pwm_ms || []).map(v=>fixed(v,1)).join(' / ') || 'Not measured'} · Window: ${m.timing_window_samples ?? 0} commands / ${m.image_timing_samples ?? 0} images over ${fixed(m.timing_window_ms,0)} ms · Last application age: ${fixed(m.timing_application_age_ms,0)} ms · Last image timing age: ${fixed(m.image_timing_age_ms,0)} ms · Steering onset p50/p95/p99: ${(m.steering_onset_ms || []).map(v=>fixed(v,1)).join(' / ') || 'Not measured'} ms (n=${m.steering_onset_samples ?? 0}) · Settling: ${(m.steering_settling_ms || []).map(v=>fixed(v,1)).join(' / ') || 'Not measured'} ms (n=${m.steering_settling_samples ?? 0}) · Total samples: ${m.timing_samples ?? 0} · Missing: ${m.timing_missing ?? '—'} · Pending: ${m.timing_pending ?? '—'} · MCU rejected deadlines: ${m.mcu_deadline_rejected ?? '—'} · MCU event loss: ${m.mcu_application_loss ?? '—'} · Applied after deadline: ${m.failed_deadlines ?? '—'} · Clock uncertainty: ${fixed(m.clock_uncertainty_ms,1)} ms`;
   drawMap(m); drawBoxes(m.boxes || [])
 }
 function drawBoxes (boxes) {
@@ -253,7 +305,7 @@ function drawMap (m) {
   if (m.pose) { const [x, y] = project(m.pose); ctx.save(); ctx.translate(x, y); ctx.rotate(-m.pose[2]); ctx.fillStyle = '#182530'; ctx.fillRect(-10, -5, 20, 10); ctx.fillStyle = '#0064b2'; ctx.fillRect(5, -5, 5, 10); ctx.restore() }
 }
 $('save-control-report').addEventListener('click', () => {
-  const report = { schemaVersion: 1, capturedAt: new Date().toISOString(), paired, phoneConnected: robot, telemetryAgeMs: latest ? Date.now() - lastTelemetry : null, motorApplicationReported: false, history: controlHistory }
+  const report = { steeringTuning: steeringPanel?.state, schemaVersion: 1, capturedAt: new Date().toISOString(), paired, phoneConnected: robot, telemetryAgeMs: latest ? Date.now() - lastTelemetry : null, motorApplicationReported: false, stream: streamStats, inputTransport: realtime?.stats(), history: controlHistory }
   download(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), 'maxbot-control-report.json')
 })
 function download (blob, name) { const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000) }
@@ -264,6 +316,8 @@ $('screenshot').addEventListener('click', () => {
   canvas.toBlob(blob => { if (blob) download(blob, `${name}.png`) }); download(new Blob([JSON.stringify({ captured_at: new Date().toISOString(), telemetry: latest }, null, 2)], { type: 'application/json' }), `${name}.json`)
 })
 setInterval(availability, 100)
+steeringPanel = new SteeringPanel(send)
+signalPanel = new SignalPanel(send, () => ({ drive_rate: Number($('drive-rate').value), steering_rate: Number($('steering-rate').value), stream: streamStats, input_transport: realtime?.stats() }))
 drawMap({}); availability()
 
 let plannedReference = null, stagedTransaction = null, stagedManifest = null

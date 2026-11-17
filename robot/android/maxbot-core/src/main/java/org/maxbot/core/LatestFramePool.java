@@ -7,6 +7,8 @@ public final class LatestFramePool {
   public static final class Slot {
     public final byte[] yuv;
     public long timestampNs;
+    public long sensorTimestampNs,cameraTimestampNs,androidCameraTimestampNs,imageAcquiredNs,packStartNs,publishedNs;
+    public boolean sensorClockComparable;
     public int width, height;
     public Object metadata;
     private int references;
@@ -18,6 +20,7 @@ public final class LatestFramePool {
 
   private final Slot[] slots;
   private Slot pending;
+  private long replacements,captureMisses,published;
 
   public LatestFramePool(int bytes) {
     slots = new Slot[] {new Slot(bytes), new Slot(bytes), new Slot(bytes)};
@@ -25,6 +28,7 @@ public final class LatestFramePool {
 
   public synchronized Slot acquireForCapture() {
     if (pending != null) {
+      replacements++;
       release(pending);
       pending = null;
     }
@@ -33,16 +37,18 @@ public final class LatestFramePool {
         s.references = 1;
         return s;
       }
-    return null;
+    captureMisses++;return null;
   }
 
   public synchronized void publish(Slot slot) {
     if (pending != null) release(pending);
     pending = slot;
+    published++;
     notifyAll();
   }
 
   public synchronized boolean hasPending() {return pending!=null;}
+  public synchronized long[] counters(){return new long[]{published,replacements,captureMisses};}
 
   public synchronized Slot takeLatest() {
     Slot result = pending;

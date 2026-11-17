@@ -34,6 +34,10 @@ final class ArCamera implements GLSurfaceView.Renderer, AutoCloseable {
   interface Listener {
     void localization(Geometry.Pose pose, boolean tracking, String reason);
 
+    void image(Image image, long timestampNs);
+
+    boolean needsCpuImage();
+
     void frame(LatestFramePool.Slot frame);
   }
 
@@ -71,7 +75,11 @@ final class ArCamera implements GLSurfaceView.Renderer, AutoCloseable {
   private int texture, program, width = 640, height = 480;
   private volatile boolean ready;
   private boolean closed;
-  private long lastFrame, lastPoseTime, clockOffset = Long.MAX_VALUE;
+  private long lastFrame, lastPoseTime;
+  private boolean realtimeSensorClock;
+  private long lastCpuTimestamp;
+  private String streamIdentity="";
+  private final Object capabilitiesLock=new Object();
   private double lastX, lastY, filteredSpeed;
   private final FloatBuffer vertices = floats(new float[] {-1, -1, 1, -1, -1, 1, 1, 1});
   private final FloatBuffer uv = floats(new float[8]);
@@ -104,7 +112,7 @@ final class ArCamera implements GLSurfaceView.Renderer, AutoCloseable {
         for(CameraConfig supported:session.getSupportedCameraConfigs(new CameraConfigFilter(session).setFacingDirection(CameraConfig.FacingDirection.BACK))){
           org.json.JSONObject item=new org.json.JSONObject();item.put("camera_id",supported.getCameraId()).put("width",supported.getImageSize().getWidth()).put("height",supported.getImageSize().getHeight()).put("fps",supported.getFpsRange().toString());configs.put(item);
         }
-        capabilities.put("configs",configs).put("selection","rear normal camera; mounted lens verification pending").put("capture_clock_validated",false);
+        synchronized(capabilitiesLock){capabilities.put("configs",configs).put("selection","rear normal camera; mounted lens verification pending").put("capture_clock_validated",false);}
         CameraConfigFilter filter =
             new CameraConfigFilter(session)
                 .setFacingDirection(CameraConfig.FacingDirection.BACK)
@@ -117,10 +125,11 @@ final class ArCamera implements GLSurfaceView.Renderer, AutoCloseable {
         if (selected == null)
           throw new IllegalStateException("ARCore 640x480/30 camera configuration unavailable");
         session.setCameraConfig(selected);
-        capabilities.put("selected_camera_id",selected.getCameraId());
+        synchronized(capabilitiesLock){capabilities.put("selected_camera_id",selected.getCameraId());}
         android.hardware.camera2.CameraManager manager=(android.hardware.camera2.CameraManager)activity.getSystemService(android.content.Context.CAMERA_SERVICE);
         android.hardware.camera2.CameraCharacteristics characteristics=manager.getCameraCharacteristics(selected.getCameraId());
-        capabilities.put("sensor_timestamp_source",characteristics.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE));
+        realtimeSensorClock=java.util.Objects.equals(characteristics.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE),android.hardware.camera2.CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME);
+        synchronized(capabilitiesLock){capabilities.put("sensor_timestamp_source",characteristics.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE));}
         Config config =
             new Config(session)
                 .setDepthMode(Config.DepthMode.DISABLED)
@@ -197,14 +206,25 @@ final class ArCamera implements GLSurfaceView.Renderer, AutoCloseable {
       if(lastFrame!=0&&cameraTime<lastFrame){lastFrame=cameraTime;listener.localization(null,false,"Camera timestamp reset; scout again");return;}
       lastFrame = cameraTime;
       long now = SystemClock.elapsedRealtimeNanos();
-      clockOffset = Math.min(clockOffset, now - cameraTime);
       // Callback offset is not an exposure-clock calibration. Use image-available time and label it.
       long captureTime = now;
-      capabilities.put("camera_timestamp_ns",Long.toString(cameraTime)).put("image_available_ns",Long.toString(now));
       Camera camera = frame.getCamera();
-      capabilities.put("intrinsics_focal",new org.json.JSONArray(camera.getImageIntrinsics().getFocalLength())).put("intrinsics_principal",new org.json.JSONArray(camera.getImageIntrinsics().getPrincipalPoint())).put("image_dimensions",new org.json.JSONArray(camera.getImageIntrinsics().getImageDimensions()));
-      String stream=capabilities.optString("selected_camera_id")+"|"+java.util.Arrays.toString(camera.getImageIntrinsics().getImageDimensions())+"|"+java.util.Arrays.toString(camera.getImageIntrinsics().getFocalLength())+"|"+java.util.Arrays.toString(camera.getImageIntrinsics().getPrincipalPoint())+"|cpu_sensor_unrotated";
-      byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(stream.getBytes(java.nio.charset.StandardCharsets.UTF_8));StringBuilder hash=new StringBuilder();for(byte value:digest)hash.append(String.format(java.util.Locale.ROOT,"%02x",value&255));streamId=hash.toString();capabilities.put("stream_id",streamId);
+      com.google.ar.core.CameraIntrinsics intrinsics=camera.getImageIntrinsics();
+      float[] focal=intrinsics.getFocalLength(), principal=intrinsics.getPrincipalPoint();
+      int[] dimensions=intrinsics.getImageDimensions();
+      String stream=capabilities.optString("selected_camera_id")+"|"+java.util.Arrays.toString(dimensions)+"|"+java.util.Arrays.toString(focal)+"|"+java.util.Arrays.toString(principal)+"|cpu_sensor_unrotated";
+      synchronized(capabilitiesLock){
+        capabilities.put("camera_timestamp_ns",Long.toString(cameraTime)).put("image_available_ns",Long.toString(now));
+        // Intrinsics can change with focus; only redo their report/hash when they actually change.
+        if(!stream.equals(streamIdentity)){
+          byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(stream.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+          char[] hex=new char[digest.length*2];String alphabet="0123456789abcdef";
+          for(int i=0;i<digest.length;i++){hex[2*i]=alphabet.charAt((digest[i]>>>4)&15);hex[2*i+1]=alphabet.charAt(digest[i]&15);}
+          streamId=new String(hex);streamIdentity=stream;
+          capabilities.put("stream_id",streamId).put("intrinsics_focal",new org.json.JSONArray(focal))
+              .put("intrinsics_principal",new org.json.JSONArray(principal)).put("image_dimensions",new org.json.JSONArray(dimensions));
+        }
+      }
       if(!streamId.equals(c.camera.streamId)){listener.localization(null,false,"Camera stream calibration binding pending; see capability report");publishImage(frame,camera,null,null,captureTime);return;}
       if (camera.getTrackingState() != TrackingState.TRACKING) {
         listener.localization(null, false, "Tracking: " + camera.getTrackingFailureReason());
@@ -263,11 +283,23 @@ final class ArCamera implements GLSurfaceView.Renderer, AutoCloseable {
 
   private void publishImage(
       Frame frame, Camera camera, Pose relative, Geometry.Pose vehicle, long captureTime) {
-    LatestFramePool.Slot slot = pool.acquireForCapture();
-    if (slot == null) return;
+    LatestFramePool.Slot slot = null;
     boolean published = false;
     try (Image image = frame.acquireCameraImage()) {
+      long acquired=SystemClock.elapsedRealtimeNanos();
       if (image.getWidth() != 640 || image.getHeight() != 480) return;
+      listener.image(image, captureTime);
+      if (!listener.needsCpuImage()) return;
+      if(image.getTimestamp()==lastCpuTimestamp)return;
+      lastCpuTimestamp=image.getTimestamp();
+      slot = pool.acquireForCapture();
+      if (slot == null) return;
+      slot.sensorTimestampNs=image.getTimestamp();slot.cameraTimestampNs=frame.getTimestamp();slot.imageAcquiredNs=acquired;
+      // ARCore's general frame timestamp has an unspecified timebase. Correlate the
+      // Android CPU image with the explicit Android Camera timestamp instead.
+      slot.androidCameraTimestampNs=frame.getAndroidCameraTimestamp();
+      slot.sensorClockComparable=realtimeSensorClock&&image.getTimestamp()==slot.androidCameraTimestampNs&&acquired>=image.getTimestamp()&&acquired-image.getTimestamp()<1_000_000_000L;
+      slot.packStartNs=SystemClock.elapsedRealtimeNanos();
       copy(image, slot.yuv);
       slot.width = image.getWidth();
       slot.height = image.getHeight();
@@ -275,12 +307,13 @@ final class ArCamera implements GLSurfaceView.Renderer, AutoCloseable {
       slot.metadata =
           relative == null || vehicle == null ? null : new Metadata(camera, relative, vehicle);
       pool.retain(slot);
+      slot.publishedNs=SystemClock.elapsedRealtimeNanos();
       pool.publish(slot);
       published = true;
       try{listener.frame(slot);}finally{pool.release(slot);}
     } catch (com.google.ar.core.exceptions.NotYetAvailableException ignored) {
     } finally {
-      if (!published) pool.release(slot);
+      if (!published && slot != null) pool.release(slot);
     }
   }
 
@@ -311,6 +344,10 @@ final class ArCamera implements GLSurfaceView.Renderer, AutoCloseable {
   private static void copy(Image image, byte[] target) {
     Image.Plane[] p=image.getPlanes();
     packPlanes(target,p[0].getBuffer().slice(),p[1].getBuffer().slice(),p[2].getBuffer().slice(),image.getWidth(),image.getHeight(),p[0].getRowStride(),p[0].getPixelStride(),p[1].getRowStride(),p[1].getPixelStride(),p[2].getRowStride(),p[2].getPixelStride());
+  }
+
+  org.json.JSONObject capabilitySnapshot() throws org.json.JSONException {
+    synchronized(capabilitiesLock){return new org.json.JSONObject(capabilities.toString());}
   }
 
   private static FloatBuffer floats(float[] data) {

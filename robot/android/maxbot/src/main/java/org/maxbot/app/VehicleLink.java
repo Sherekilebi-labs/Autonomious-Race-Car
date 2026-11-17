@@ -40,6 +40,7 @@ final class VehicleLink implements AutoCloseable {
   private final java.util.function.LongSupplier elapsedMs,elapsedNs;
   private volatile long motionNotBeforeNs;
   private long manualStopDueNs;
+  private final Object submissionLock=new Object();private long latestProducedNs;
   private final Listener listener;
   private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
   private volatile boolean closed, connected;
@@ -279,6 +280,14 @@ final class VehicleLink implements AutoCloseable {
         if (!connected) send(new RunSupervisor.Output("STOP", 0, 0));
         return;
       }
+      if("output_written".equals(m.optString("type"))&&boot.equals(m.optString("boot"))&&session.equals(m.optString("session"))){
+        String canonical="W|"+boot+"|"+session+"|"+m.getLong("seq")+"|"+m.getLong("epoch")+"|"+m.getLong("output_ms")+"|"+m.getInt("pwm");
+        if(!Protocol.verify(config.network.pairingKey,canonical,m.getString("mac")))return;
+        double bound=clock.uncertaintyMs(now);
+        m.put("phone_received_ns",Long.toString(elapsedNs.getAsLong())).put("mapped_phone_output_ns",Double.isFinite(bound)?Long.toString(clock.toLocal(m.getLong("output_ms"))*1_000_000L):JSONObject.NULL)
+          .put("clock_uncertainty_ms",Double.isFinite(bound)?bound:JSONObject.NULL).put("authenticated",true);
+        listener.telemetry(m,elapsedNs.getAsLong());return;
+      }
       if(("applied".equals(m.optString("type"))||"local_applied".equals(m.optString("type")))&&boot.equals(m.optString("boot"))&&session.equals(m.optString("session"))){
         String canonical="A|"+boot+"|"+session+"|"+m.getLong("seq")+"|"+m.getLong("epoch")+"|"+m.getLong("rx_ms")+"|"+m.getLong("validated_ms")+"|"+m.getLong("applied_ms")+"|"+m.getLong("expires_ms")+"|"+m.getInt("pwm");
         if("local_applied".equals(m.optString("type")))canonical+="|"+m.getString("reason");
@@ -347,7 +356,7 @@ final class VehicleLink implements AutoCloseable {
   }
   void send(RunSupervisor.Output out) {
     if(closed||((out.mode.equals("DRIVE")||out.mode.equals("DRIVE_MANUAL"))&&out.sourceStateNs<=motionNotBeforeNs))return;
-    newest.set(out);
+    synchronized(submissionLock){long stamp=out.producedNs>0?out.producedNs:elapsedNs.getAsLong();if(stamp<latestProducedNs)return;latestProducedNs=stamp;newest.set(out);}
   }
   synchronized JSONObject controlStatus() {
     JSONObject status=new JSONObject();
@@ -412,14 +421,14 @@ final class VehicleLink implements AutoCloseable {
               .put("mac", Protocol.sign(config.network.pairingKey, canonical));
       if(out.sourceStateNs>0)timing.sent(sequence,out.sourceFrameNs,out.sourceStateNs,out.producedNs>0?out.producedNs:nowNs,nowNs);
       steeringTiming.sent(sequence,out.steeringDeg,out.mode.equals("DRIVE")||out.mode.equals("DRIVE_MANUAL"));
-      sendRaw(m.toString());lastTxMode=out.mode;
+      sendRaw(m.toString());long socketSentNs=elapsedNs.getAsLong();lastTxMode=out.mode;
       if(out.mode.equals("DRIVE_MANUAL")){
         // Send zero before the last manual lease runs out if the control producer stalls.
         // This never renews motion; the ESP still enforces expiry if that STOP is lost.
         long leadMs=Math.max(15,2*(long)Math.ceil(clock.uncertaintyMs(now))+5);
         manualStopDueNs=Math.min(out.validUntilNs,clock.toLocal(expires)*1_000_000L)-leadMs*1_000_000L;
       }else manualStopDueNs=0;
-      JSONObject trace=m;trace.remove("mac");trace.put("type","command_sent").put("phone_send_ns",Long.toString(nowNs)).put("policy_output_ns",Long.toString(out.producedNs)).put("clock_uncertainty_ms",Double.isFinite(clock.uncertaintyMs(now))?clock.uncertaintyMs(now):JSONObject.NULL);
+      JSONObject trace=m;trace.remove("mac");trace.put("type","command_sent").put("phone_send_ns",Long.toString(nowNs)).put("phone_socket_sent_ns",Long.toString(socketSentNs)).put("policy_output_ns",Long.toString(out.producedNs)).put("clock_uncertainty_ms",Double.isFinite(clock.uncertaintyMs(now))?clock.uncertaintyMs(now):JSONObject.NULL);
       listener.telemetry(trace,nowNs);
     } catch (Exception e) {
       connected = false;

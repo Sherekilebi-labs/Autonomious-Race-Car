@@ -1,0 +1,248 @@
+{
+  "schemaVersion": 1,
+  "artifactType": "maxbot_signal_session_audit",
+  "source": "maxbot-signals-2026-11-16T19-23-59.705Z-6cf0c96f.json",
+  "sourceSha256": "d00041e0079f4cd3bd08d64e048b548c760c002c721ab76b8a6da85af4489b35",
+  "session": "6cf0c96f820f82d7c6c9b975ff23181c",
+  "units": "milliseconds unless otherwise named",
+  "camera_frame_minus_cpu_image_ms": {
+    "n": 176,
+    "min": -1.473642,
+    "p50": -0.532573,
+    "p95": 1.360176,
+    "p99": 1.773755,
+    "max": 1.881675,
+    "mean": -0.32903896590909093
+  },
+  "sensor_to_image_available_unvalidated_ms": {
+    "n": 176,
+    "min": 50.823657,
+    "p50": 61.895557,
+    "p95": 79.05064,
+    "p99": 107.675627,
+    "max": 113.155209,
+    "mean": 63.06855732386364
+  },
+  "eligible_sensor_frames": 0,
+  "decoder_only_ms": {
+    "n": 171,
+    "min": 48.378182,
+    "p50": 53.560058,
+    "p95": 59.152662,
+    "p99": 61.129902,
+    "max": 91.739697,
+    "mean": 54.06455278947369
+  },
+  "rule_and_box_construction_ms": {
+    "n": 171,
+    "min": 0.007969,
+    "p50": 0.024063,
+    "p95": 0.049531,
+    "p99": 0.434948,
+    "max": 0.810729,
+    "mean": 0.03206870175438597
+  },
+  "phone_receipt_to_post_tick_marker_matched_ms": {
+    "n": 767,
+    "min": 0.119715,
+    "p50": 1.063986,
+    "p95": 3.379448,
+    "p99": 8.021298,
+    "max": 15.465631,
+    "mean": 1.348786070404172
+  },
+  "input_transition_to_pwm_by_event": {
+    "key_down": {
+      "n": 32,
+      "min": 11,
+      "p50": 57,
+      "p95": 137,
+      "p99": 146,
+      "max": 146,
+      "mean": 70.53125
+    },
+    "KeyW_down": {
+      "n": 12,
+      "min": 20,
+      "p50": 57,
+      "p95": 146,
+      "p99": 146,
+      "max": 146,
+      "mean": 69.91666666666667
+    },
+    "KeyD_down": {
+      "n": 4,
+      "min": 36,
+      "p50": 40,
+      "p95": 65,
+      "p99": 65,
+      "max": 65,
+      "mean": 49
+    },
+    "key_up": {
+      "n": 30,
+      "min": 29,
+      "p50": 63,
+      "p95": 130,
+      "p99": 142,
+      "max": 142,
+      "mean": 70.03333333333333
+    },
+    "KeyD_up": {
+      "n": 4,
+      "min": 35,
+      "p50": 41,
+      "p95": 142,
+      "p99": 142,
+      "max": 142,
+      "mean": 70.75
+    },
+    "KeyW_up": {
+      "n": 10,
+      "min": 31,
+      "p50": 63,
+      "p95": 103,
+      "p99": 103,
+      "max": 103,
+      "mean": 67.4
+    },
+    "KeyS_down": {
+      "n": 12,
+      "min": 11,
+      "p50": 48,
+      "p95": 120,
+      "p99": 120,
+      "max": 120,
+      "mean": 70.08333333333333
+    },
+    "KeyS_up": {
+      "n": 12,
+      "min": 33,
+      "p50": 59,
+      "p95": 117,
+      "p99": 117,
+      "max": 117,
+      "mean": 70.08333333333333
+    },
+    "KeyA_down": {
+      "n": 4,
+      "min": 57,
+      "p50": 91,
+      "p95": 137,
+      "p99": 137,
+      "max": 137,
+      "mean": 95.25
+    },
+    "KeyA_up": {
+      "n": 4,
+      "min": 29,
+      "p50": 65,
+      "p95": 130,
+      "p99": 130,
+      "max": 130,
+      "mean": 75.75
+    }
+  },
+  "input_to_pwm_clock_bounds_ms": {
+    "n": 62,
+    "min": 12.246,
+    "p50": 23.488,
+    "p95": 31.122,
+    "p99": 49.09,
+    "max": 49.09,
+    "mean": 23.569451612903226
+  },
+  "browser_presentations": {
+    "total": 215,
+    "distinct_frame_ids": 177,
+    "repeated_frame_presentations": 38
+  },
+  "corrected_mac_first_presentations": {
+    "all_updates": {
+      "decision_to_first_opportunity_ms": {
+        "n": 170,
+        "min": 7,
+        "p50": 97,
+        "p95": 524,
+        "p99": 630,
+        "max": 639,
+        "mean": 176.3470588235294
+      },
+      "image_available_to_first_opportunity_ms": {
+        "n": 170,
+        "min": 178.537464,
+        "p50": 280.080329,
+        "p95": 703.909759,
+        "p99": 809.162048,
+        "max": 817.982936,
+        "mean": 355.3972029
+      },
+      "clock_bound_ms": {
+        "n": 170,
+        "min": 8.798,
+        "p50": 14.216000000000001,
+        "p95": 37.374,
+        "p99": 42.744,
+        "max": 43.048,
+        "mean": 16.583011764705883
+      }
+    },
+    "warnings_only": {
+      "decision_to_first_opportunity_ms": {
+        "n": 31,
+        "min": 26,
+        "p50": 111,
+        "p95": 428,
+        "p99": 639,
+        "max": 639,
+        "mean": 188.83870967741936
+      },
+      "image_available_to_first_opportunity_ms": {
+        "n": 31,
+        "min": 187.664182,
+        "p50": 289.314026,
+        "p95": 612.49653,
+        "p99": 809.162048,
+        "max": 809.162048,
+        "mean": 364.14059212903226
+      },
+      "clock_bound_ms": {
+        "n": 31,
+        "min": 12.14,
+        "p50": 14.742,
+        "p95": 19.026,
+        "p99": 37.664,
+        "max": 37.664,
+        "mean": 15.712838709677419
+      }
+    }
+  },
+  "thermal_status_counts": {
+    "2": 176
+  },
+  "manual_transports": {
+    "webrtc": 911,
+    "websocket": 102
+  },
+  "unsuccessful_manual_calls": [
+    {
+      "deadman": true,
+      "fault": "Manual neutral: waiting for fresh input",
+      "n": 6
+    },
+    {
+      "deadman": false,
+      "fault": "Manual neutral: controls released",
+      "n": 10
+    }
+  ],
+  "warning_classes": {
+    "airplane": 19,
+    "truck": 1,
+    "tv": 3,
+    "laptop": 2,
+    "suitcase": 5,
+    "person": 1
+  },
+  "scope": "Software/trace audit. Sensor-clock diagnostics are unvalidated. No physical traction-onset result is inferred."
+}

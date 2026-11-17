@@ -68,7 +68,7 @@ def actuator_id(c):
 
 def firmware_source_id():
     digest=hashlib.sha256()
-    for name in ['firmware/maxbot/maxbot.ino','firmware/common/actuator_pwm.h','firmware/common/motion_deadline.h','firmware/common/motion_protocol.h']:
+    for name in ['firmware/maxbot/maxbot.ino','firmware/common/actuator_pwm.h','firmware/common/motion_deadline.h','firmware/common/motion_protocol.h','firmware/common/steering_controller.h','firmware/maxbot/steering_tuning.h']:
         path=ROOT/name
         if path.exists():digest.update(name.encode()+b'\0'+path.read_bytes())
     return digest.hexdigest()

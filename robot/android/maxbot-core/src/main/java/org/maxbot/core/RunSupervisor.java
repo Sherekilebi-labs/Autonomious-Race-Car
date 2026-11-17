@@ -413,7 +413,7 @@ public final class RunSupervisor {
   public Output tick(long now){
     long executionStart=System.nanoTime();
     Work current;
-    synchronized(this){Output immediate=prepareTick(now);if(immediate!=null)return immediate;current=work;}
+    synchronized(this){Output immediate=prepareTick(now);if(immediate!=null)return new Output(immediate.mode,immediate.steeringDeg,immediate.pwm,immediate.validUntilNs,immediate.sourceStateNs,immediate.sourceFrameNs,now);current=work;}
     if(current.reset)current.controller.reset();
     Output output=current.controller.followState(current.state,current.steering,current.path,current.nearest,c,now);
     // Policy execution never holds the supervisor monitor. Stop/manual always advance authority.

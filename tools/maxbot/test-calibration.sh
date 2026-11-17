@@ -7,6 +7,8 @@ c++ -std=c++17 -Wall -Wextra -Werror -I "$root/firmware/calibration" -I "$root/f
 "$build/test"
 c++ -std=c++17 -Wall -Wextra -Werror -I "$root/firmware/common" "$root/tools/maxbot/MotionDeadlineTest.cpp" -o "$build/deadline"
 "$build/deadline"
+c++ -std=c++17 -Wall -Wextra -Werror -I "$root/firmware/common" "$root/tools/maxbot/SteeringControllerTest.cpp" -o "$build/steering"
+"$build/steering"
 python3 "$root/tools/maxbot/test-firmware-stop.py"
 python3 - "$root/firmware/calibration/dashboard.h" "$build/dashboard.js" <<'PY'
 import pathlib,re,sys

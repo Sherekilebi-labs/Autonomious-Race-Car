@@ -62,7 +62,7 @@ Six-pixel control corners and eight-pixel viewport corners. The console contains
 
 ## Components
 
-Manual drive becomes keyboard-ready after manual arming. WASD and press-and-hold on-screen direction buttons ramp signed drive/steering requests; release decays toward zero at the configured rate. Drive and steering rate fields use percent of full scale per second (100 and 250 by default). Focus loss, stale telemetry and disconnect clear keyboard input immediately. Emergency stop has an Escape shortcut and requests acknowledgement. Inputs have visible labels, focus outlines and minimum 44px buttons. Empty camera/map and stale telemetry states are explicit.
+Manual drive becomes keyboard-ready after manual arming. WASD and press-and-hold on-screen direction buttons ramp signed drive/steering requests; release decays toward zero at the configured rate. Drive and steering rate fields use percent of full scale per second (100 and 250 by default). Traction starts at 200 logical PWM, ramps to 255, and becomes zero below the 200 threshold on release/reversal. The steering tuning disclosure exposes labeled gains, deadband, friction floor, output ceiling and D filter with actual/target feedback. Apply is temporary; Save to ESP32 confirms verified persistent storage. Both require disarmed outputs. Focus loss, stale telemetry and disconnect clear keyboard input immediately. Emergency stop has an Escape shortcut and requests acknowledgement. Inputs have visible labels, focus outlines and minimum 44px buttons. Empty camera/map and stale telemetry states are explicit.
 
 ## Do's and Don'ts
 

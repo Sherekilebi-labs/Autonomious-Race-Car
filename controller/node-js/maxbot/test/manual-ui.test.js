@@ -22,6 +22,7 @@ function dashboard () {
     getContext () { return ctx }
     getBoundingClientRect () { return { width: 640, height: 480 } }
     closest () { return this.editable ? this : null }
+    checkValidity () { return true }
     setAttribute (name, value) { this.attributes[name] = value }
     getAttribute (name) { return this.attributes[name] }
     fire (name, values = {}) { for (const fn of this.events[name] || []) fn({ target: this, preventDefault () {}, ...values }) }
@@ -34,9 +35,9 @@ function dashboard () {
   let now = 100000
   class ClockDate extends Date { static now () { return now } }
   const sandbox = { document, window: { addEventListener: (name, fn) => (windowEvents[name] ||= []).push(fn) }, TextEncoder, console,
-    performance: { now: () => now }, Date: ClockDate, WebSocket: { OPEN: 1 }, setInterval: () => 1, clearInterval () {}, setTimeout () {}, sent: [] }
+    performance: { now: () => now }, Date: ClockDate, WebSocket: { OPEN: 1 }, setInterval: () => 1, clearInterval () {}, setTimeout () {}, clearTimeout () {}, sent: [] }
   vm.createContext(sandbox)
-  for (const file of ['manual-control.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../public', file), 'utf8'), sandbox)
+  for (const file of ['manual-control.js', 'steering-tuning.js', 'signal-monitor.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../public', file), 'utf8'), sandbox)
   sandbox.packet = { mode: 'STOPPED', calibrated: false, manual_ready: true, manual_armed: false, armed: false,
     manual_max_pwm: 255, steering_limits_deg: [-26, 26], missing: ['cones.heightM'], manual_missing: [], battery_monitoring: false }
   const run = code => vm.runInContext(code, sandbox)
@@ -79,7 +80,7 @@ test('ramp crosses zero at the same rate, clamps, decays, and neutralizes opposi
   assert.equal(ramp.step(keys, .4), false); assert.equal(ramp.steering, 0)
 })
 
-test('manual arm enables WASD without autonomy; W reaches full in 1s, D in .4s, release decays', () => {
+test('manual arm enables WASD without autonomy; W starts at 200 PWM, D reaches full in .4s, release skips the dead band', () => {
   const d = dashboard(), sent = d.sandbox.sent
   assert.equal(d.buttons.find(b => b.dataset.action === 'arm_manual').disabled, false)
   for (const action of ['arm', 'scout', 'run']) assert.equal(d.buttons.find(b => b.dataset.action === action).disabled, true)
@@ -89,23 +90,24 @@ test('manual arm enables WASD without autonomy; W reaches full in 1s, D in .4s, 
   d.document.activeElement = d.buttons.find(b => b.dataset.action === 'arm_manual') // Button focus must allow WASD right after clicking arm.
   d.arm(); assert.equal(d.get('manual-control').dataset.ready, 'true')
   d.key('KeyW'); d.key('KeyD'); d.advance(400)
-  assert.equal(sent.at(-1).steering_deg, -26); assert.equal(sent.at(-1).pwm, 102)
+  assert.equal(sent.at(-1).steering_deg, -26); assert.equal(sent.at(-1).pwm, 255)
   d.advance(600); assert.equal(sent.at(-1).pwm, 255)
   d.key('KeyW', false); d.key('KeyD', false); d.advance(500)
-  assert.equal(sent.at(-1).pwm, 127); assert.equal(sent.at(-1).steering_deg, 0)
+  assert.equal(sent.at(-1).pwm, 0); assert.equal(sent.at(-1).steering_deg, 0)
   d.advance(500); assert.equal(sent.at(-1).pwm, 0); assert.equal(sent.at(-1).deadman, false)
   assert.equal(sent.at(-2).deadline_ms - sent.at(-2).event_ms, 300)
   assert.ok(sent.every((m, i) => i === 0 || m.seq > sent[i - 1].seq))
 })
 
-test('opposite drive cancels existing PWM before reverse; quick taps create intermediate output', () => {
+test('opposite drive crosses neutral before the 200 PWM breakaway jump; taps stay in the moving band', () => {
   const d = dashboard(), sent = d.sandbox.sent
   d.arm(); d.key('KeyS'); d.advance(1000); assert.equal(sent.at(-1).pwm, -255)
-  d.key('KeyS', false); d.key('KeyW'); d.advance(500); assert.equal(sent.at(-1).pwm, -127)
-  d.advance(1000); assert.equal(sent.at(-1).pwm, 128)
+  d.key('KeyS', false); d.key('KeyW'); d.advance(100); assert.equal(sent.at(-1).pwm, -229)
+  d.advance(160); assert.ok(sent.at(-1).pwm >= 200); assert.ok(sent.some(m => m.action === 'manual' && m.pwm === 0))
+  d.advance(500); assert.equal(sent.at(-1).pwm, 255)
   d.run('release()')
-  for (let n = 0; n < 5; n++) { d.key('KeyW'); d.advance(100); d.key('KeyW', false); d.advance(60) }
-  assert.ok(sent.at(-1).pwm > 0 && sent.at(-1).pwm < 100)
+  for (let n = 0; n < 5; n++) { d.key('KeyW'); d.advance(60); d.key('KeyW', false); d.advance(40) }
+  assert.ok(sent.at(-1).pwm >= 200 && sent.at(-1).pwm < 255)
 })
 
 test('rate fields change ramps; typing/modifiers cannot drive; invalid rates pause controls', () => {
@@ -149,14 +151,14 @@ test('on-screen direction buttons ramp, release and share input with physical ke
   const d = dashboard(), sent = d.sandbox.sent
   d.arm()
   d.get('key-w').fire('pointerdown', { pointerId: 1, button: 0 }); d.advance(500)
-  assert.equal(sent.at(-1).pwm, 128)
+  assert.equal(sent.at(-1).pwm, 255)
   d.get('key-d').fire('pointerdown', { pointerId: 2, button: 0 }); d.advance(400)
   assert.equal(sent.at(-1).steering_deg, -26)
   d.key('KeyW')
   d.get('key-w').fire('pointerup', { pointerId: 1 }); d.advance(100)
   assert.equal(sent.at(-1).pwm, 255) // Physical W still held.
   d.key('KeyW', false); d.get('key-d').fire('pointercancel', { pointerId: 2 }); d.advance(500)
-  assert.ok(Math.abs(sent.at(-1).pwm - 128) <= 1); assert.equal(sent.at(-1).steering_deg, 0)
+  assert.equal(sent.at(-1).pwm, 0); assert.equal(sent.at(-1).steering_deg, 0)
   d.advance(500); assert.equal(sent.at(-1).deadman, false)
   d.get('key-a').fire('keydown', { key: ' ', repeat: false }); d.advance(400)
   assert.equal(sent.at(-1).steering_deg, 26)
@@ -201,4 +203,38 @@ test('ESP link/fault state blocks manual controls while reset remains available'
   assert.equal(d.buttons.find(b=>b.dataset.action==='reset').disabled,false);assert.match(d.get('manual-status').textContent,/ABSOLUTE_EXPIRY/);
   d.sandbox.packet.mcu_fault='';d.sandbox.packet.vehicle_connected=false;d.run('render(latest);availability()');
   assert.equal(d.get('key-w').disabled,true);assert.match(d.get('manual-status').textContent,/ESP32 link unavailable/);
+})
+
+
+test('all nonzero browser drive requests start at 200; release and reversal never send 1..199', () => {
+  const d=dashboard(), sent=d.sandbox.sent;d.arm();d.key('KeyW');d.step();assert.equal(sent.at(-1).pwm,200);
+  d.advance(160);assert.ok(sent.at(-1).pwm>200&&sent.at(-1).pwm<255);
+  d.key('KeyW',false);d.advance(200);assert.equal(sent.at(-1).pwm,0);
+  d.key('KeyS');d.step();assert.equal(sent.at(-1).pwm,-200);d.advance(300);assert.equal(sent.at(-1).pwm,-255);
+  d.key('KeyS',false);d.key('KeyW');d.advance(600);
+  assert.ok(sent.filter(m=>m.action==='manual').every(m=>m.pwm===0||Math.abs(m.pwm)>=200));
+})
+
+
+test('steering panel requires disarm and real matching save acknowledgement, preserves edited values during polling', () => {
+  const d=dashboard();d.get('pid-p').value='50';d.get('pid-i').value='0';d.get('pid-d').value='0.15';d.get('pid-deadband').value='0.75';d.get('pid-min').value='0';d.get('pid-max').value='255';d.get('pid-filter').value='12';
+  d.run('steeringPanel.request("get")');const read=d.sandbox.sent.at(-1);
+  const device={status:'ok',kp_milli:50000,ki_milli:3000,kd_milli:1300,deadband_mdeg:3500,min_pwm:0,max_pwm:255,filter_millihz:12000,saved:false,armed:false,drive_pwm:0,target_mdeg:1000,actual_mdeg:200,steering_pwm:50,p_milli:40000,i_milli:0,d_milli:0,pot_adc:780};
+  d.sandbox.reply={request_id:read.request_id,device};d.run('steeringPanel.receive(reply)');assert.equal(d.get('pid-apply').disabled,false);assert.equal(d.get('pid-deadband').value,'3.5');
+  d.get('pid-preset').fire('click');assert.equal(d.get('pid-deadband').value,'0.75');d.get('pid-p').value='55';d.get('pid-p').fire('input');
+  d.run('steeringPanel.request("get")');d.sandbox.reply.request_id=d.sandbox.sent.at(-1).request_id;d.run('steeringPanel.receive(reply)');assert.equal(d.get('pid-p').value,'55');
+  d.get('pid-save').fire('click');const save=d.sandbox.sent.at(-1);assert.equal(save.operation,'save');assert.equal(save.settings.kp_milli,55000);
+  d.sandbox.reply={request_id:'wrong',device:{...device,status:'saved',saved:true}};d.run('steeringPanel.receive(reply)');assert.match(d.get('pid-status').textContent,/Saving/);
+  d.sandbox.reply={request_id:save.request_id,error:'No ESP32 acknowledgement'};d.run('steeringPanel.receive(reply)');assert.match(d.get('pid-status').textContent,/No ESP32 acknowledgement/);
+  d.run('steeringPanel.request("get")');d.sandbox.reply={request_id:d.sandbox.sent.at(-1).request_id,device:{...device,armed:true}};d.run('steeringPanel.receive(reply)');assert.equal(d.get('pid-save').disabled,true);assert.match(d.get('pid-gate').textContent,/disarm/);
+})
+
+
+test('stopped PID hides retained target; active zero target is distinct from phone request; stale feedback is cleared', () => {
+  const d=dashboard();const device={status:'ok',kp_milli:80000,ki_milli:5000,kd_milli:0,deadband_mdeg:1500,min_pwm:80,max_pwm:255,filter_millihz:12000,saved:false,armed:true,drive_pwm:0,target_mdeg:12200,actual_mdeg:11100,steering_pwm:0,p_milli:0,i_milli:0,d_milli:0,pot_adc:673,diagnostics_version:2,pid_active:false,feedback_valid:true,feedback_min_mdeg:-60000,feedback_max_mdeg:60000,feedback_rejects:0,command_min_mdeg:-26000,command_max_mdeg:26000};
+  function receive(){d.run('steeringPanel.request("get")');d.sandbox.reply={request_id:d.sandbox.sent.at(-1).request_id,device};d.run('steeringPanel.receive(reply)')}
+  receive();assert.match(d.get('pid-feedback').textContent,/PID inactive/);assert.doesNotMatch(d.get('pid-feedback').textContent,/12.2/);assert.equal(d.run('steeringPanel.samples.at(-1).target'),null);
+  device.pid_active=true;device.target_mdeg=0;receive();assert.match(d.get('pid-feedback').textContent,/ESP target 0.0°/);assert.equal(d.run('steeringPanel.samples.at(-1).target'),0);
+  device.pid_active=false;device.feedback_valid=false;device.feedback_rejects=1;receive();assert.match(d.get('pid-feedback').textContent,/Feedback temporarily invalid/);assert.match(d.get('pid-feedback-range').textContent,/-60° to 60°/);
+  d.step(1300);d.run('steeringPanel.updateButtons()');assert.match(d.get('pid-feedback').textContent,/expired/);assert.equal(d.run('steeringPanel.samples.length'),0);
 })

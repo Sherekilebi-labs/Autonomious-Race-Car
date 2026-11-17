@@ -1,8 +1,14 @@
 # MaxBot 1.0
 
+Current handoff: [implementation status, hardware evidence, measured results and roadmap](docs/PROJECT_STATUS_AND_ROADMAP.md), updated 17 November 2026.
+
+[Project status, completed work, hardware evidence and future roadmap](docs/PROJECT_STATUS_AND_ROADMAP.md) — updated 17 November 2026.
+
 Pixel 5 + ESP32 autonomy for a 1:16 four-wheel-drive car with a DC traction motor, TA6586 H-bridge and five-wire potentiometer-feedback steering. The phone runs ARCore localization, cone detection, mapping and 50 Hz pure-pursuit feedback. The Mac supplies the local dashboard and plans the full reference while stopped; model training remains a later task. Original OpenBot documentation: [README.openbot.md](README.openbot.md).
 
 Explore the [interactive system map](docs/system-diagram.html), from the project overview through L4 code and contracts. [Usage and maintenance](docs/system-diagram.md).
+
+Manual-mode **YOLOv5n collision warnings and signal monitoring**: the Mac dashboard can continuously record camera-to-warning and input-to-ESP-output evidence, then save a JSON dataset and Markdown results. Physical traction onset still requires external evidence. See the [experiment and calculations guide](docs/autonomy/signal-propagation.md).
 
 **Manual commissioning is a separate ready-to-build profile.** It uses signed `ARM_MANUAL` / `DRIVE_MANUAL` commands, the measured steering calibration and direct PWM up to ±255; it does not need ARCore tracking, a cone model, course geometry or an unmeasured speed/PWM model. Physical confirmations remain unmodified. Until `driveBrakeVerified` is actually confirmed, runtime zero/stop requests coast instead of assuming electrical braking. The current local build config creates **MaxBot-Drive** on the ESP32 for both Pixel and Mac; private credentials, matching APK/firmware, offline Mac launcher and upload script are packaged under ignored `dist/manual-drive/`. [Manual setup and first-test guide](docs/manual-drive.md).
 

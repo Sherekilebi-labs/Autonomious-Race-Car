@@ -3,7 +3,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import org.maxbot.core.LatestFramePool;
-/** Optional video/recording owns copies; inference and camera never wait for its consumer. */
+/** Optional recording owns copies; inference and camera never wait for its consumer. */
 final class FrameFanout implements AutoCloseable {
   private final LatestFramePool pool=new LatestFramePool(640*480*3/2);
   private final ExecutorService worker=Executors.newSingleThreadExecutor(r->new Thread(r,"maxbot-optional-frames"));

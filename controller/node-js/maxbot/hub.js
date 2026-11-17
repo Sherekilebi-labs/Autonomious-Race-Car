@@ -34,13 +34,15 @@ class Hub {
       if (state.role === 'robot') this.robot = peer
       else { this.operator = peer; state.heartbeat = this.clock() }
       this.send(peer, { type: 'authenticated', role: state.role, robot: Boolean(this.robot), session_id: state.sessionId, server_ms: this.clock() })
-      if (this.robot && this.operator) { this.send(this.robot, { type: 'operator_joined' }); this.send(this.operator, { type: 'robot_connected' }) }
+      if (this.robot && this.operator) { this.send(this.robot, { type: 'operator_joined', session_id: this.peers.get(this.operator).sessionId }); this.send(this.operator, { type: 'robot_connected' }) }
       return
     }
     if (state.role === 'robot') {
-      if (m.type === 'telemetry') { state.heartbeat=this.clock(); this.lastTelemetry = { ...m, received_ms: this.clock() }; this.send(this.operator, this.lastTelemetry); if(this.onTelemetry)this.onTelemetry() }
+      if (m.type === 'telemetry') { state.heartbeat=this.clock(); this.lastTelemetry = { ...m, received_ms: this.clock() }; if (!this.operator || this.operator.bufferedAmount < 16 * 1024) this.send(this.operator, this.lastTelemetry); if(this.onTelemetry)this.onTelemetry() }
       else if (m.type === 'clock_probe' && Number.isSafeInteger(m.t1)) { const t2 = this.clock(); this.send(peer, { type: 'clock_sample', t1: m.t1, t2, t3: this.clock() }) }
       else if(m.type==='export_transfer'&&this.onExport)this.onExport(m)
+      else if (['signal_trace','signal_monitor_status'].includes(m.type) && this.onRobotSignal) this.onRobotSignal(m)
+      else if (m.type === 'collision_warning') this.send(this.operator, m)
       else if (['artifact_result','export','capabilities'].includes(m.type)) this.send(this.operator,m)
       else if (m.type === 'rtc') this.send(this.operator, m)
       return
@@ -59,12 +61,17 @@ class Hub {
       if (m.action==='estop' && this.directStop) this.directStop.request()
       if (this.clock() - state.heartbeat > 500 && m.action !== 'estop' && m.action !== 'stop') return
       this.send(this.robot, m)
+    } else if (m.type === 'signal_monitor' && this.onMonitor) {
+      if (this.clock() - state.heartbeat <= 500 && ['start','stop','events','status'].includes(m.operation)) this.onMonitor(m, peer)
+    } else if (m.type === 'steering_tuning' && this.onTuning) {
+      if(this.clock()-state.heartbeat<=500 && ['get','apply','save'].includes(m.operation) && typeof m.request_id==='string' && m.request_id.length<=80)this.onTuning(m,peer)
     } else if (m.type === 'plan' && this.onPlan) { this.onPlan(m.request).catch(e => this.send(peer, { type: 'planning', status: 'failed', reason: e.message }))
     } else if (m.type === 'artifact' && this.onArtifact) { this.onArtifact(m, peer)
     } else if (m.type === 'rtc') this.send(this.robot, m)
   }
 
   detach (peer) {
+    if (this.onDisconnected && (this.operator === peer || this.robot === peer)) this.onDisconnected(this.operator === peer ? 'operator' : 'phone')
     if (this.operator === peer) { this.send(this.robot, { type: 'operator_left' }); this.operator = null }
     if (this.robot === peer) { this.robot = null; this.lastTelemetry = null; this.send(this.operator, { type: 'robot_disconnected' }) }
     this.peers.delete(peer)

@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="maxbot-console-version" content="0.4.0"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MaxBot · Slalom console</title><link rel="stylesheet" href="/style.css"><script src="/manual-control.js" defer></script><script src="/app.js" defer></script>
+  <meta charset="utf-8"><meta name="maxbot-console-version" content="0.6.1"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MaxBot · Slalom console</title><link rel="stylesheet" href="/style.css"><script src="/manual-control.js" defer></script><script src="/realtime-inputs.js" defer></script><script src="/steering-tuning.js" defer></script><script src="/signal-monitor.js" defer></script><script src="/app.js" defer></script>
 </head>
 <body>
   <header><div><h1>MaxBot</h1><span class="subtitle">Slalom console</span></div><div class="connection"><span id="connection">Disconnected</span><span id="direct-stop-status" role="status">Direct stop: unavailable</span><button id="estop" class="danger">Emergency stop <kbd>Esc</kbd></button></div></header>
@@ -12,13 +12,23 @@
       <div class="vision">
         <div class="section-title"><h2>Camera</h2><button id="screenshot" disabled>Save screenshot</button></div>
         <div class="viewport"><video id="video" autoplay muted playsinline></video><canvas id="overlay" width="640" height="480" aria-label="Cone detections"></canvas><div id="video-empty"><strong>Waiting for the Pixel camera</strong><span>Join the ESP Wi-Fi and open MaxBot on the phone.</span></div></div>
+        <p id="stream-status" class="instruction" role="status">Stream timing appears when video connects.</p>
+        <div id="collision-warning" class="collision-warning" data-state="unavailable" role="status"><strong id="warning-title">Vision warning unavailable or stale</strong><span id="warning-detail">YOLOv5n baseline · image-zone estimate · advisory</span></div>
+        <section class="signal-monitor" aria-labelledby="signal-heading">
+          <div class="section-title"><h2 id="signal-heading">Signal propagation</h2></div>
+          <p class="instruction">Record camera → warning and manual input → ESP output timing. Arm and drive as usual. Actual motor onset needs an external measurement.</p>
+          <label for="signal-notes">Test notes</label><textarea id="signal-notes" rows="2" maxlength="2000" placeholder="Surface, battery voltage, phone temperature, obstacle and test condition"></textarea>
+          <div class="signal-actions"><button type="button" id="signal-start" disabled>Start monitoring</button><button type="button" id="signal-stop" disabled>Stop and save</button><button type="button" id="signal-download" disabled>Download data JSON</button><button type="button" id="signal-markdown" disabled>Download results .md</button></div>
+          <p id="signal-status" class="instruction" role="status">Connect the updated Pixel APK to start monitoring.</p>
+          <p class="instruction">Saves continuously on the Mac; downloads one JSON on completion. Ends automatically after 15 minutes or 32 MiB. Stopping monitoring leaves driving controls active.</p>
+        </section>
         <div id="fault" role="alert">Car disconnected. Motion controls are unavailable.</div>
         <div class="run-actions"><button data-action="arm" disabled>Arm vehicle</button><button data-action="scout" disabled>Scout course</button><button data-action="run" disabled>Start timed run</button><button data-action="stop" disabled>Stop / disarm</button><button data-action="reset" disabled>Reset stop</button></div>
         <p class="instruction">Scout → stop/disarm and freeze map → Mac plan → reposition → verify → timed run → braking. First pass: car to the right of cone 1.</p>
       </div>
       <aside>
         <div class="section-title"><h2>Vehicle</h2><span id="mode">DISCONNECTED</span></div>
-        <dl id="telemetry"><div><dt>Speed <small>vision estimate</small></dt><dd id="speed">— <span>m/s</span></dd></div><div><dt>Steering <small>actual / target</small></dt><dd id="steering">—</dd></div><div><dt>Battery <small id="battery-method">voltage estimate</small></dt><dd id="battery">—</dd></div><div><dt>Cones cleared</dt><dd id="progress">0 / 4</dd></div><div><dt>Run time</dt><dd id="elapsed">—</dd></div><div><dt>Frame age / inference</dt><dd id="latency">—</dd></div></dl>
+        <dl id="telemetry"><div><dt>Speed <small>vision estimate</small></dt><dd id="speed">— <span>m/s</span></dd></div><div><dt>Steering <small>actual / phone request</small></dt><dd id="steering">—</dd></div><div><dt>Battery <small id="battery-method">voltage estimate</small></dt><dd id="battery">—</dd></div><div><dt>Cones cleared</dt><dd id="progress">0 / 4</dd></div><div><dt>Run time</dt><dd id="elapsed">—</dd></div><div><dt>Frame age / inference</dt><dd id="latency">—</dd></div></dl>
         <div class="section-title"><h2>Manual control</h2></div>
         <button data-action="arm_manual" disabled>Arm manual control</button>
         <p id="manual-status" class="instruction" role="status">Waiting for manual commissioning status.</p>
@@ -30,15 +40,35 @@
             <div class="drive-key"><button type="button" id="key-d" aria-label="Right (D)" aria-pressed="false" disabled>D</button><span>Right</span></div>
           </div>
           <label class="range-label" for="throttle">Drive request <output id="throttle-value">0 PWM</output></label><div class="axis-meter"><meter id="throttle" min="-255" max="255" value="0">0 PWM</meter><span id="throttle-fill" class="axis-fill"></span></div>
+          <p class="instruction">Drive is 0 or ±200–255 PWM. W/S starts at 200; release cuts to zero below 200.</p>
           <label class="range-label" for="steer">Steering request <output id="steer-value">0°</output></label><div class="axis-meter"><meter id="steer" min="-10" max="10" value="0">0°</meter><span id="steer-fill" class="axis-fill"></span></div>
         </div>
         <div class="ramp-settings">
-          <label for="drive-rate">Drive ramp <span>% / second</span></label><input id="drive-rate" type="number" min="1" max="1000" step="any" value="100" inputmode="decimal" aria-describedby="drive-rate-help rate-error"><small id="drive-rate-help">0 to full in 1 second</small>
+          <label for="drive-rate">Drive ramp <span>% / second</span></label><input id="drive-rate" type="number" min="1" max="1000" step="any" value="100" inputmode="decimal" aria-describedby="drive-rate-help rate-error"><small id="drive-rate-help">200 to 255 PWM in 0.216 seconds</small>
           <label for="steering-rate">Steering ramp <span>% / second</span></label><input id="steering-rate" type="number" min="1" max="1000" step="any" value="250" inputmode="decimal" aria-describedby="steering-rate-help rate-error"><small id="steering-rate-help">Center to full in 0.4 seconds</small>
           <p id="rate-error" role="status"></p>
         </div>
         <p class="instruction">Arm, then use WASD or hold a direction button. Manual input window: 300 ms; lost-link watchdog: 500 ms. Hold to ramp up; release to ramp toward zero. Opposite keys ramp through zero. Clicking a field pauses keyboard input. Leaving this window stops and disarms.</p>
         <p id="stop-behavior" class="instruction">Stop behavior awaiting telemetry.</p>
+        <details id="steering-tuning" class="steering-tuning">
+          <summary>Steering PID tuning</summary>
+          <p id="pid-gate" class="instruction">Pair the console to read steering settings.</p>
+          <div class="pid-fields">
+            <label for="pid-p">P <small>PWM / degree</small></label><input id="pid-p" type="number" min="0.001" max="500" step="0.001" value="50" inputmode="decimal">
+            <label for="pid-i">I <small>PWM / degree / second</small></label><input id="pid-i" type="number" min="0" max="200" step="0.001" value="0" inputmode="decimal">
+            <label for="pid-d">D <small>PWM × seconds / degree</small></label><input id="pid-d" type="number" min="0" max="20" step="0.001" value="0.15" inputmode="decimal">
+            <label for="pid-deadband">Deadband <small>degrees</small></label><input id="pid-deadband" type="number" min="0.1" max="5" step="0.001" value="0.75" inputmode="decimal">
+            <label for="pid-min">Minimum effort <small>logical steering PWM</small></label><input id="pid-min" type="number" min="0" max="255" step="1" value="0" inputmode="numeric">
+            <label for="pid-max">Maximum effort <small>logical steering PWM</small></label><input id="pid-max" type="number" min="1" max="255" step="1" value="255" inputmode="numeric">
+            <label for="pid-filter">D filter <small>cutoff in Hz</small></label><input id="pid-filter" type="number" min="1" max="50" step="0.001" value="12" inputmode="decimal">
+          </div>
+          <div class="pid-actions"><button type="button" id="pid-read" disabled>Read from ESP32</button><button type="button" id="pid-preset" disabled>Load starting values</button><button type="button" id="pid-apply" disabled>Apply</button><button type="button" id="pid-save" disabled>Save to ESP32</button></div>
+          <p id="pid-status" role="status">No ESP32 steering settings read.</p><p id="pid-active" class="instruction">Fields show a starting point, not measured device values.</p>
+          <p id="pid-feedback" class="instruction">Steering feedback appears after connecting.</p><p id="pid-feedback-range" class="instruction"></p>
+          <canvas id="pid-chart" width="640" height="180" role="img" aria-label="Last ten seconds of steering: active ESP target in blue and actual angle in dark grey"></canvas>
+          <p class="instruction">10 seconds · active ESP target in blue · actual in dark grey</p>
+          <p class="instruction">Test with the wheels on the floor and the car's normal weight. Begin with I = 0. Use small A/D ramps near center, then test while rolling slowly. If effort is too weak, raise minimum effort in steps of 10 to find the smallest value that moves reliably. If it hunts, reduce P or minimum effort; add D gradually for overshoot. Save after testing.</p>
+        </details>
         <details class="control-delivery" open><summary>Control delivery</summary><p id="control-delivery" role="status">Waiting for phone telemetry.</p><button type="button" id="save-control-report">Save control report</button><p class="instruction">Records recent requests and phone status. New phone builds also report sent mode and ESP command acknowledgement. These do not measure motor-terminal voltage.</p></details>
       </aside>
     </section>

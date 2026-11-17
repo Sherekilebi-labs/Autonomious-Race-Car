@@ -1,5 +1,7 @@
 # Simple manual control — 0.4.0
 
+Current follow-ups: [streaming and direct input](streaming-latency.md), [loaded steering tuning and the 200-PWM traction threshold](steering-tuning.md). The record below describes the frozen 0.4.0 recovery point.
+
 Use the matching `dist/task1-private/maxbot-0.4.0-manual.apk` and current firmware. The ESP32 was flashed over USB and its signed firmware identity `19b9632ee8b0b3dcee73b448b6b6621dbc869adee551eae9322386bf3d9321ba` was verified. The actuator calibration identity remains `210b9c6c3489ffac1a75e66182cf207d60b6042937fac9dc7cd534210accd687`.
 
 Join MaxBot-Drive on the Mac and Pixel, open MaxBot, and use the paired localhost console. Press **Arm manual control**, then use WASD or the on-screen direction buttons. Release keys to decay toward neutral; Stop/disarm and Emergency stop still request immediate zero. Focus loss clears input and disarms. The drive and steering ramp fields retain their 1 second and 0.4 second defaults.

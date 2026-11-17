@@ -85,4 +85,31 @@ public final class VehicleLinkTest {
       assertEquals(-1,field("appliedSequence").getLong(link));assertTrue(events.isEmpty());assertFalse(link.connected());
     } finally {close(link);}
   }
+  @Test public void latePeriodicOutputCannotOverwriteNewImmediateInputOrStop() throws Exception {
+    VehicleLink link=link(new ArrayList<>());
+    try {
+      org.maxbot.core.RunSupervisor.Output fresh=new org.maxbot.core.RunSupervisor.Output("DRIVE_MANUAL",4,80,5000,1000,0,2000);
+      org.maxbot.core.RunSupervisor.Output old=new org.maxbot.core.RunSupervisor.Output("DRIVE_MANUAL",1,10,5000,1000,0,1900);
+      link.send(fresh);link.send(old);
+      java.util.concurrent.atomic.AtomicReference<?> newest=(java.util.concurrent.atomic.AtomicReference<?>)field("newest").get(link);
+      assertSame(fresh,newest.get());
+      org.maxbot.core.RunSupervisor.Output stop=new org.maxbot.core.RunSupervisor.Output("STOP",0,0,0,0,0,2100);
+      link.send(stop);link.send(fresh);assertSame(stop,newest.get());
+    }finally{close(link);}
+  }
+
+  @Test public void pwmWriteEvidenceRequiresItsOwnSignatureAndSession()throws Exception {
+    List<JSONObject> events=new ArrayList<>();VehicleLink link=link(events);
+    try{
+      String session=(String)field("session").get(link);
+      JSONObject m=new JSONObject().put("v",1).put("type","output_written").put("boot",BOOT).put("session",session).put("seq",42).put("epoch",3).put("output_ms",13).put("pwm",200);
+      m.put("mac",Protocol.sign(KEY,"W|"+BOOT+"|"+session+"|42|3|13|200"));
+      receive(link,new JSONObject(m.toString()).put("pwm",255));assertTrue(events.isEmpty());
+      receive(link,new JSONObject(m.toString()).put("session","f".repeat(32)));assertTrue(events.isEmpty());
+      receive(link,m);assertEquals(1,events.size());assertTrue(events.get(0).getBoolean("authenticated"));
+      assertTrue(events.get(0).isNull("mapped_phone_output_ns")); // No invented mapping before clock sync.
+      assertEquals(-1,field("appliedSequence").getLong(link)); // Trace evidence never grants motion authority.
+    }finally{close(link);}
+  }
+
 }

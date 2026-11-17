@@ -63,6 +63,16 @@ public final class CoreTest {
   }
 
   public static void main(String[] args) {
+    java.util.List<Runnable> tasks=new java.util.ArrayList<>();
+    java.util.List<Integer> consumed=new java.util.ArrayList<>(),released=new java.util.ArrayList<>();
+    LatestDispatcher<Integer> dispatcher=new LatestDispatcher<>(tasks::add,value->{consumed.add(value);if(value==3)throw new IllegalStateException("bad frame");},released::add);
+    dispatcher.offer(1);dispatcher.offer(2);dispatcher.offer(3);
+    check(tasks.size()==1 && released.equals(java.util.Arrays.asList(1,2)),"pending video replaces obsolete frames and releases each once");
+    tasks.remove(0).run();check(consumed.equals(java.util.Arrays.asList(3)),"latest video only consumed");
+    dispatcher.offer(4);tasks.remove(0).run();check(consumed.equals(java.util.Arrays.asList(3,4)),"failed frame cannot stall video");
+    dispatcher.offer(5);dispatcher.close();tasks.remove(0).run();dispatcher.offer(6);
+    check(released.equals(java.util.Arrays.asList(1,2,3,4,5,6)),"close and late frames release storage exactly once");
+
     Calibration c = calibrated();
     check(c.missing().isEmpty(), "complete calibration");
     c.power.senseSource = "regulated5V";
@@ -264,6 +274,7 @@ public final class CoreTest {
     check(!simple.manual(8,120,true,now,now+301_000_000L),"manual deadline cannot exceed 300 ms");
     AutonomyTest.run();
     ClockSyncTest.run();
+    CollisionWarningTest.run();
     System.out.println("PASS " + checks + " core checks");
   }
 }

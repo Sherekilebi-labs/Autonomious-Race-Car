@@ -39,6 +39,8 @@ struct Command {
 };
 struct Applied {int64_t seq,epoch; uint64_t rx,validated,applied,expiry; int pwm;char reason[32];char session[33];};
 QueueHandle_t commands,applications;
+struct OutputWrite {int64_t seq,epoch;uint64_t time;int pwm;char session[33];};
+QueueHandle_t outputWrites;
 std::atomic<uint32_t> stopGeneration{0},appliedStopGeneration{0};
 std::atomic<uint64_t> appliedStopMs{0};
 std::atomic<uint32_t> applicationLoss{0},motorOverruns{0},deadlineRejected{0};
@@ -48,13 +50,14 @@ String stopHistory[32];uint64_t stopHistoryTime[32]{};int stopHistoryHead=0,pend
 String pendingStopId; IPAddress stopPeer; uint16_t stopPort=0; uint32_t pendingStopGeneration=0;
 maxbot::MotionOrder ordering;
 portMUX_TYPE snapshotMux=portMUX_INITIALIZER_UNLOCKED;
-struct MotorSnapshot {float angle,volts; int pot,battery,pwm; bool armed,manual,emergency; char fault[32]; int64_t seq,epoch; uint64_t expiry,sensorMs;};
+struct MotorSnapshot {float angle,volts,target,steerP,steerI,steerD; int pot,battery,pwm,steerPwm; bool armed,manual,emergency,pidActive,feedbackValid;uint32_t feedbackRejects; char fault[32]; int64_t seq,epoch; uint64_t expiry,sensorMs;};
 MotorSnapshot snapshot{};
 String bootId,activeSession,serialLine;char motorSession[33]="";
 IPAddress peerIp;
 uint16_t peerPort=0;
 uint64_t lastCommand=0,lastTelemetry=0,lastLoop=0,stallSince=0,lastMotion=0;
 int64_t lastSequence=-1;
+bool steeringReset=true;
 bool armed=false,manualArmed=false,emergency=false,useUdp=false,outputsReady=false;
 struct FaultText {
   char value[32]; FaultText(const char* text){strlcpy(value,text,sizeof(value));}
@@ -108,7 +111,7 @@ void bridge(int forwardChannel,int reverseChannel,int pwm,bool brake){
 }
 void halt(const char* reason,bool latch=false){
   // Zero outputs revoke the previous motion lease; STOP must not leave an old expiry armed.
-  drivePwm=0;absoluteExpiry=0;integral=0;lastError=0;stallSince=0;
+  steeringReset=true;targetAngle=0;drivePwm=0;absoluteExpiry=0;integral=0;lastError=0;stallSince=0;
   lastMotion=0;
   bridge(0,1,0,true);bridge(2,3,0,false);
   if(reason[0]){fault=reason;armed=false;manualArmed=false;}
@@ -128,12 +131,14 @@ void reply(JsonDocument& doc,bool network,IPAddress ip,uint16_t port){
   if(network){udp.beginPacket(ip,port);serializeJson(doc,udp);udp.endPacket();}
   else{serializeJson(doc,Serial);Serial.println();}
 }
+void receiveSteeringTuning(const String& text,bool serialReply,IPAddress ip,uint16_t port);
 void receive(const String& input,bool network,IPAddress ip=IPAddress(),uint16_t port=0){
   StaticJsonDocument<1024> msg;
   if(input.length()>900||deserializeJson(msg,input)||strlen(PAIRING_KEY)<32)return;
   uint64_t rx=timeMs();
   if((msg["v"]|0)!=1&&(msg["v"]|0)!=2)return;
   String type=msg["type"]|"";
+  if(type=="steering_tuning"){receiveSteeringTuning(input,!network,ip,port);return;}
   if(type=="hello"){
     String nonce=msg["nonce"]|"";
     if(nonce.length()!=32||!sameMac(hmac("H|"+nonce),msg["mac"]|""))return;
@@ -205,10 +210,12 @@ void acknowledgeStop(){
   StaticJsonDocument<384> out;out["v"]=1;out["type"]="operator_stop_applied";out["boot"]=bootId;out["request_id"]=pendingStopId;out["applied_ms"]=t;out["mac"]=sig;
   stopUdp.beginPacket(stopPeer,stopPort);serializeJson(out,stopUdp);stopUdp.endPacket();pendingStopId="";
 }
+#include "steering_tuning.h"
 void applyCommand(const Command& c){
   uint64_t now=timeMs();
   if(!maxbot::validCommandDeadline(now,c.issued,c.expiry,c.mode)){deadlineRejected.fetch_add(1);return;}
   const char* mode=c.mode;
+  if(tuningBusy.load()&&(strcmp(mode,"ARM")==0||strcmp(mode,"ARM_MANUAL")==0||strcmp(mode,"DRIVE")==0||strcmp(mode,"DRIVE_MANUAL")==0))return;
   if(c.epoch<motionEpoch)return;
   if(c.epoch>motionEpoch){halt("");motionEpoch=c.epoch;absoluteExpiry=0;}
   if(strcmp(mode,"ESTOP")==0)halt("ESTOP",true);
@@ -221,7 +228,7 @@ void applyCommand(const Command& c){
   else if(strcmp(mode,"ARM")==0||strcmp(mode,"ARM_MANUAL")==0){
     bool permitted=strcmp(mode,"ARM")==0?MAXBOT_CALIBRATED:MANUAL_COMMISSIONING_ENABLED;
     if(permitted&&outputsReady&&!emergency&&!fault.length()&&physicalStopReleased()&&batteryHealthy()){
-      armed=true;manualArmed=strcmp(mode,"ARM_MANUAL")==0;targetAngle=actualAngle;drivePwm=0;absoluteExpiry=0;
+      halt("");armed=true;manualArmed=strcmp(mode,"ARM_MANUAL")==0;
     }
   }else if(armed&&!emergency&&!fault.length()&&c.stopGeneration==resetGeneration&&((strcmp(mode,"DRIVE_MANUAL")==0)==manualArmed)){
     targetAngle=c.angle/1000.f;drivePwm=manualArmed?constrain(c.pwm,-MANUAL_MAX_PWM,MANUAL_MAX_PWM):c.pwm;lastMotion=now;absoluteExpiry=c.expiry;
@@ -242,6 +249,7 @@ void checkMotionDeadline(){
 }
 void motorTask(void*){
   TickType_t next=xTaskGetTickCount();char lastFault[32]="";
+  int64_t writtenSequence=-1;int writtenPwm=0;
   for(;;){
     uint64_t start=timeMs();
     uint32_t stop=stopGeneration.load();
@@ -249,14 +257,26 @@ void motorTask(void*){
     Command command;for(int n=0;n<8&&xQueueReceive(commands,&command,0)==pdTRUE;n++)applyCommand(command);
     // The stop latch takes priority even over queued reset/arm commands.
     if(stopGeneration.load()!=resetGeneration)halt("OPERATOR_STOP",true);
+    if(tuningBusy.load()){armed=false;manualArmed=false;halt("");steeringMemory={};steeringResult={};steeringTimeUs=0;tuningSafe.store(true);}
     sensors();uint64_t sensorTime=timeMs();
     checkMotionDeadline();
     steeringLoop();
+    // Only the final command consumed by this iteration reaches the PWM driver.
+    // Existing `applied` events precede this call and cannot prove a hardware write.
+    if(lastSequence!=writtenSequence||drivePwm!=writtenPwm){
+      OutputWrite output{lastSequence,motionEpoch,timeMs(),drivePwm,{}};
+      strlcpy(output.session,motorSession,sizeof(output.session));
+      if(xQueueSend(outputWrites,&output,0)!=pdTRUE)applicationLoss.fetch_add(1);
+      writtenSequence=lastSequence;writtenPwm=drivePwm;
+    }
     if(strcmp(lastFault,fault.value)!=0){
       strlcpy(lastFault,fault.value,sizeof(lastFault));Applied local{};local.seq=lastSequence;local.epoch=motionEpoch;local.applied=timeMs();local.expiry=absoluteExpiry;local.pwm=drivePwm;strlcpy(local.reason,lastFault,sizeof(local.reason));strlcpy(local.session,motorSession,sizeof(local.session));
       if(xQueueSend(applications,&local,0)!=pdTRUE)applicationLoss.fetch_add(1);
     }
+    bool pidActive=maxbot::steeringControlActive(timeMs(),armed,emergency,fault.length()!=0,steeringFeedback.valid,lastMotion,absoluteExpiry,manualArmed?maxbot::kManualInputMs:100);
     portENTER_CRITICAL(&snapshotMux);
+    snapshot.pidActive=pidActive;snapshot.feedbackValid=steeringFeedback.valid;snapshot.feedbackRejects=steeringFeedback.rejected;
+    snapshot.target=targetAngle;snapshot.steerPwm=pidActive?steeringResult.pwm:0;snapshot.steerP=pidActive?steeringResult.p:0;snapshot.steerI=pidActive?steeringResult.i:0;snapshot.steerD=pidActive?steeringResult.d:0;
     snapshot.angle=actualAngle;snapshot.volts=voltage;snapshot.pot=potRaw;snapshot.battery=batteryRaw;snapshot.pwm=drivePwm;
     snapshot.armed=armed;snapshot.manual=manualArmed;snapshot.emergency=emergency;snapshot.seq=lastSequence;snapshot.epoch=motionEpoch;snapshot.expiry=absoluteExpiry;snapshot.sensorMs=sensorTime;
     fault.toCharArray(snapshot.fault,sizeof(snapshot.fault));
@@ -268,7 +288,7 @@ void motorTask(void*){
 
 void sensors(){
 #if MAXBOT_ACTUATORS_READY
-  potRaw=analogRead(POT_PIN);
+  potRaw=maxbot::steeringMedianAdc(analogRead(POT_PIN),analogRead(POT_PIN),analogRead(POT_PIN));
 #if BATTERY_MONITORING_ENABLED
   batteryRaw=analogRead(BATTERY_PIN);
   float measured=(batteryRaw*ADC_REFERENCE_MV/4095.f+ADC_OFFSET_MV)*DIVIDER_RATIO/1000.f;
@@ -276,9 +296,11 @@ void sensors(){
 #else
   batteryRaw=-1;voltage=0;  // Protocol sentinel for unavailable; never a fake 8 V reading.
 #endif
-  actualAngle=angleFromAdc(potRaw);
+  float measuredAngle=angleFromAdc(potRaw);
+  bool feedbackFault=steeringFeedback.observe(timeMs(),potRaw,measuredAngle,STEER_RIGHT,STEER_LEFT);
+  if(steeringFeedback.valid)actualAngle=measuredAngle;
   if(!physicalStopReleased()){halt("PHYSICAL_STOP",true);return;}
-  if(potRaw<32||potRaw>4063||actualAngle<STEER_RIGHT-3||actualAngle>STEER_LEFT+3){halt("STEERING_FEEDBACK");return;}
+  if(!steeringFeedback.valid){halt(feedbackFault?"STEERING_FEEDBACK":"");return;}
   if(!batteryHealthy()){halt("LOW_VOLTAGE");return;}
 #else
   // Compile-time safe diagnostics: no unknown pin is configured or driven.
@@ -293,22 +315,21 @@ void sensors(){
 }
 void steeringLoop(){
 #if MAXBOT_ACTUATORS_READY
-  if(!armed||emergency||fault.length()){bridge(0,1,0,true);bridge(2,3,0,false);return;}
+  if(steeringReset){steeringMemory={};steeringResult={};steeringTimeUs=0;steeringReset=false;}
+  uint64_t nowUs=esp_timer_get_time();double dt=steeringTimeUs?(nowUs-steeringTimeUs)/1e6:.005;steeringTimeUs=nowUs;
+  if(!armed||emergency||fault.length()||!steeringFeedback.valid){bridge(0,1,0,true);bridge(2,3,0,false);steeringMemory={};steeringResult={};return;}
   bridge(0,1,drivePwm*DRIVE_POLARITY,true);
   // Holding a fresh STOP never renews an old steering target.
-  if(!lastMotion||timeMs()-lastMotion>(manualArmed?maxbot::kManualInputMs:100)){bridge(2,3,0,false);integral=0;return;}
-  float error=targetAngle-actualAngle;
-  if(fabs(error)<=STEER_DEADBAND){bridge(2,3,0,false);integral=0;stallSince=0;return;}
-  integral=constrain(integral+error*.005f,-50.f,50.f);
-  float effort=STEER_KP*error+STEER_KI*integral+STEER_KD*(error-lastError)/.005f;lastError=error;
-  int output=(int)constrain(effort,-(float)STEER_MAX_PWM,(float)STEER_MAX_PWM);
-  if((actualAngle>=STEER_LEFT&&output>0)||(actualAngle<=STEER_RIGHT&&output<0))output=0;
-  bridge(2,3,output*STEER_POLARITY,false);
-  if(abs(output)>STEER_MAX_PWM/3){
-    if(!stallSince){stallSince=timeMs();stallAngle=actualAngle;}
-    else if(fabs(actualAngle-stallAngle)>1){stallSince=timeMs();stallAngle=actualAngle;}
-    else if(timeMs()-stallSince>300)halt("STEERING_STALL");
-  }else stallSince=0;
+  if(!maxbot::steeringControlActive(timeMs(),armed,emergency,fault.length()!=0,steeringFeedback.valid,lastMotion,absoluteExpiry,manualArmed?maxbot::kManualInputMs:100)){
+    bridge(2,3,0,false);steeringMemory={};steeringResult={};return;
+  }
+  steeringResult=maxbot::steeringStep(steeringMemory,steeringSettings,targetAngle,actualAngle,dt);
+  if(!steeringResult.valid){halt("STEERING_TIMING");return;}
+  int output=steeringResult.pwm;
+  int bounded=maxbot::steeringLimitOutput(actualAngle,output,STEER_RIGHT,STEER_LEFT);
+  if(bounded!=output){output=bounded;steeringMemory.integral=0;}
+  steeringResult.pwm=output;bridge(2,3,output*STEER_POLARITY,false);
+  if(maxbot::steeringStalled(timeMs(),actualAngle,targetAngle-actualAngle,output,steeringSettings.maxPwm,stallSince,stallAngle))halt("STEERING_STALL");
 #endif
 }
 void telemetry(){
@@ -356,10 +377,12 @@ void setup(){
 #else
     WiFi.mode(WIFI_STA);WiFi.setSleep(false);WiFi.begin(WIFI_SSID,WIFI_PASSWORD);
 #endif
-    udp.begin(4242);stopUdp.begin(4243);
+    udp.begin(4242);stopUdp.begin(4243);tuningUdp.begin(4245);
   }
+  loadSteeringSettings();
   commands=xQueueCreate(8,sizeof(Command));applications=xQueueCreate(64,sizeof(Applied));
-  if(!commands||!applications){halt("TASK_SETUP",true);return;}
+  outputWrites=xQueueCreate(64,sizeof(OutputWrite));
+  if(!commands||!applications||!outputWrites){halt("TASK_SETUP",true);return;}
   if(xTaskCreatePinnedToCore(motorTask,"maxbot-motor",4096,nullptr,4,nullptr,1)!=pdPASS){halt("TASK_SETUP",true);return;}
   xTaskCreatePinnedToCore(stopTask,"maxbot-stop",6144,nullptr,3,nullptr,0);
 }
@@ -372,8 +395,17 @@ void loop(){
   }
   int length=udp.parsePacket();
   if(length>0){char packet[1024];if(length<1024){int n=udp.read(packet,1023);packet[n]=0;receive(String(packet),true,udp.remoteIP(),udp.remotePort());}else while(udp.available())udp.read();}
+  steeringTuning();
   uint64_t now=timeMs();
   Applied event;
+  OutputWrite output;
+  for(int n=0;n<8&&xQueueReceive(outputWrites,&output,0)==pdTRUE;n++){
+    if(output.seq<0)continue;
+    StaticJsonDocument<512> out;out["v"]=1;out["type"]="output_written";out["boot"]=bootId;out["session"]=output.session;
+    out["seq"]=output.seq;out["epoch"]=output.epoch;out["output_ms"]=output.time;out["pwm"]=output.pwm;
+    out["mac"]=hmac("W|"+bootId+"|"+String(output.session)+"|"+String((long long)output.seq)+"|"+String((long long)output.epoch)+"|"+String((unsigned long long)output.time)+"|"+String(output.pwm));
+    reply(out,useUdp,peerIp,peerPort);
+  }
   for(int n=0;n<8&&xQueueReceive(applications,&event,0)==pdTRUE;n++){
     StaticJsonDocument<768> out;out["v"]=1;out["type"]=event.reason[0]?"local_applied":"applied";out["boot"]=bootId;out["session"]=event.session;
     out["seq"]=event.seq;out["epoch"]=event.epoch;out["rx_ms"]=event.rx;out["validated_ms"]=event.validated;out["applied_ms"]=event.applied;out["expires_ms"]=event.expiry;out["pwm"]=event.pwm;

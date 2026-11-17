@@ -42,6 +42,10 @@ jdks
 /robot/android/maxbot/src/main/cpp/osqp_generated/
 /.tools/
 /runs/
+# Local hardware session exports; publish reviewed summaries rather than raw telemetry.
+/maxbot-signals-*.json
+/maxbot-signals-*.jsonl
+/maxbot-signals-*.md
 /datasets/
 /models/
 /dist/

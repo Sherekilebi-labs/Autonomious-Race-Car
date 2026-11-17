@@ -7,13 +7,24 @@ const { WebSocketServer } = require('ws')
 const { Hub } = require('./hub')
 const { OperatorStop } = require('./services/operator-stop')
 const { Planner } = require('./services/planner')
+const { SteeringTuning } = require('./services/steering-tuning')
+const { SignalMonitoring } = require('./services/signal-monitor')
 
-function start ({ key = process.env.MAXBOT_PAIRING_KEY, host = process.env.MAXBOT_HOST || '127.0.0.1', port = Number(process.env.MAXBOT_PORT || 8081), espHost = process.env.MAXBOT_ESP_HOST, discover = false } = {}) {
+function start ({ key = process.env.MAXBOT_PAIRING_KEY, host = process.env.MAXBOT_HOST || '127.0.0.1', port = Number(process.env.MAXBOT_PORT || 8081), espHost = process.env.MAXBOT_ESP_HOST, steeringPort = 4245, discover = false, signalDirectory = process.env.MAXBOT_SIGNAL_DIRECTORY || path.resolve(__dirname, '../../../runs/signal-propagation') } = {}) {
   const hub = new Hub(key)
+  const signals = new SignalMonitoring({ directory: signalDirectory, sendRobot: m => hub.send(hub.robot, m), publish: m => hub.send(hub.operator, m), snapshot: () => hub.lastTelemetry })
+  hub.onMonitor = m => signals.request(m)
+  hub.onRobotSignal = m => signals.phone(m)
+  hub.onDisconnected = role => signals.disconnect(role)
+  const steering = new SteeringTuning({key,host:espHost || '192.168.4.1',port:steeringPort})
+  hub.onTuning = async (m,peer) => {
+    try { const device=await steering.request(m.operation,m.settings);hub.send(peer,{type:'steering_tuning',request_id:m.request_id,device}) }
+    catch(error) { hub.send(peer,{type:'steering_tuning',request_id:m.request_id,error:error.message}) }
+  }
   const planner = new Planner({ root: path.resolve(__dirname, '../../..'), publish: m => hub.send(hub.operator,m), snapshot: () => {
     const t=hub.lastTelemetry;return t && {stopped: !t.armed && !['RUN','SCOUT','MANUAL'].includes(t.mode) && Date.now()-t.received_ms<500, mapEpoch:t.map_epoch,calibrationId:t.calibration_id,configId:t.config_id,modelId:t.model_id,vehicleModelId:t.vehicle_model_id}
   } })
-  hub.onTelemetry=()=>planner.observe()
+  hub.onTelemetry=()=>{planner.observe();signals.telemetry(hub.lastTelemetry)}
   hub.onPlan=request=>planner.run(request)
   hub.onArtifact=(m,peer)=>{
     const t=hub.lastTelemetry
@@ -25,13 +36,19 @@ function start ({ key = process.env.MAXBOT_PAIRING_KEY, host = process.env.MAXBO
   hub.onExport=async m=>{try{if(hub.lastTelemetry?.armed||['SCOUT','RUN','MANUAL'].includes(hub.lastTelemetry?.mode))throw new Error('Export paused during motion');const result=await exports.receive(m);hub.send(hub.robot,{type:'export_ack',request_id:m.request_id,status:'ok',...result});if(result.status==='saved')hub.send(hub.operator,{type:'export',...result})}catch(e){await exports.close();hub.send(hub.robot,{type:'export_ack',request_id:m.request_id,status:'failed',message:e.message})}}
   let discoverySocket
   if(discover){const {discovery}=require('./services/discovery');discoverySocket=discovery({key,port})}
-  const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/manual-control.js': ['manual-control.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] }
+  const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/realtime-inputs.js': ['realtime-inputs.js', 'text/javascript'], '/manual-control.js': ['manual-control.js', 'text/javascript'], '/steering-tuning.js': ['steering-tuning.js', 'text/javascript'], '/signal-monitor.js': ['signal-monitor.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] }
   const server = http.createServer((req, res) => {
     res.setHeader('Cache-Control', 'no-store')
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'no-referrer')
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ws: wss:; media-src 'self' blob:; img-src 'self' blob: data:; font-src 'self'; frame-ancestors 'none'")
     const route = (req.url || '').split('?')[0]
+    const reportFile = signals.download(route)
+    if (reportFile) {
+      res.setHeader('Content-Type', reportFile.endsWith('.json') ? 'application/json' : 'text/markdown; charset=utf-8')
+      res.setHeader('Content-Disposition', `attachment; filename="${path.basename(reportFile)}"`)
+      return fs.createReadStream(reportFile).on('error', () => { res.writeHead(404); res.end('Report unavailable') }).pipe(res)
+    }
     if (route === '/health') { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: true, robot: Boolean(hub.robot), operator: Boolean(hub.operator) })) }
     const font = /^\/font\/(Gilroy-(Regular|Bold|Medium)\.ttf)$/.exec(route)
     const entry = files[route]
@@ -53,10 +70,10 @@ function start ({ key = process.env.MAXBOT_PAIRING_KEY, host = process.env.MAXBO
     })
   })
   const timer = setInterval(() => hub.tick(), 50)
-  server.on('error', () => { clearInterval(timer); websocket.close() })
-  server.on('close', () => { planner.cancel(); exports.close().catch(()=>{}); if(hub.directStop)hub.directStop.close(); if(discoverySocket)discoverySocket.close(); clearInterval(timer); for (const peer of websocket.clients) peer.terminate(); websocket.close() })
+  server.on('error', () => { steering.close(); clearInterval(timer); websocket.close() })
+  server.on('close', () => { signals.close(); steering.close(); planner.cancel(); exports.close().catch(()=>{}); if(hub.directStop)hub.directStop.close(); if(discoverySocket)discoverySocket.close(); clearInterval(timer); for (const peer of websocket.clients) peer.terminate(); websocket.close() })
   server.listen(port, host, () => console.log(`MaxBot console: http://${host}:${server.address().port} (trusted LAN only)`))
-  return { server, hub, websocket }
+  return { server, hub, websocket, signals }
 }
 
 if (require.main === module) {
