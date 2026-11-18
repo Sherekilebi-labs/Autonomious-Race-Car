@@ -3,10 +3,16 @@ import java.util.*;
 /** One-sided, bounded scouting; hidden cones remain priors and never enter the observed map. */
 public final class ScoutPlanner {
   private ScoutPlanner(){}
+  /** Declared course prior: 1 m maximum center spacing; never an observed map landmark. */
+  public static double maximumRowX(Calibration c){return c.car.wheelbaseM+c.car.frontOverhangM+c.limits.launchClearM+c.cones.baseDiameterM/2+(c.cones.count-1)*1.0;}
   public static Trajectory segment(Calibration c,Geometry.Pose start,List<CourseMap.Cone> observed,VehicleModel model){
     if(model==null||!model.missing().isEmpty())throw new IllegalStateException("Reviewed low-speed scout dynamics required");
     double end=observed.isEmpty()?.6:Geometry.local(start,observed.get(observed.size()-1).point()).x+.25;
-    end=Math.min(end,3.7);List<Geometry.Point> row=new ArrayList<>();for(int i=0;i<4;i++)row.add(Geometry.world(start,1.31194+.7*i,0));
+    double first=c.car.wheelbaseM+c.car.frontOverhangM+c.limits.launchClearM+c.cones.baseDiameterM/2,last=maximumRowX(c);
+    end=Math.min(end,last+.25);List<Geometry.Point> row=new ArrayList<>();
+    // Protect the whole possible row, including every placement in the declared spacing range.
+    // Sampling is <=20 mm and the clearance test below adds a 20 mm envelope margin.
+    for(double prior=first;prior<=last+.02;prior+=.02)row.add(Geometry.world(start,prior,0));
     for(CourseMap.Cone cone:observed)row.add(cone.point());
     List<Trajectory.Sample> samples=new ArrayList<>();double x=start.x,y=start.y,yaw=start.yaw,s=0;double maxK=Math.tan(Math.toRadians(Math.min(-c.steering.rightDeg,c.steering.leftDeg)))/c.car.wheelbaseM;
     double previousAngle=0;int limit=800;
@@ -18,7 +24,10 @@ public final class ScoutPlanner {
       if(!samples.isEmpty())p.speed=Math.min(p.speed,model.steeringRateRadS*.01/Math.max(1e-9,Math.abs(angle-previousAngle)));
       previousAngle=angle;
       for(Geometry.Point cone:row)if(Geometry.footprintDistance(new Geometry.Pose(x,y,yaw,0,0),cone,c)<c.cones.baseDiameterM/2+c.limits.clearanceM+.02)throw new IllegalStateException("Next scout segment lacks row-envelope clearance");
-      for(double a:new double[]{-c.car.rearOverhangM,c.car.wheelbaseM+c.car.frontOverhangM})for(double b:new double[]{-c.car.widthM/2,c.car.widthM/2})if(Math.abs(Geometry.local(start,Geometry.world(new Geometry.Pose(x,y,yaw,0,0),a,b)).y)>.5*c.limits.lateralSpaceM-.02)throw new IllegalStateException("Scout floor limit");
+      for(double a:new double[]{-c.car.rearOverhangM,c.car.wheelbaseM+c.car.frontOverhangM})for(double b:new double[]{-c.car.widthM/2,c.car.widthM/2}){
+        Geometry.Point corner=Geometry.local(start,Geometry.world(new Geometry.Pose(x,y,yaw,0,0),a,b));double[] bounds=c.limits.floorBoundsM;
+        if(bounds!=null?(corner.x<bounds[0]+.02||corner.x>bounds[1]-.02||corner.y<bounds[2]+.02||corner.y>bounds[3]-.02):Math.abs(corner.y)>.5*c.limits.lateralSpaceM-.02)throw new IllegalStateException("Scout floor limit");
+      }
       samples.add(p);double mid=yaw+k*.005;x+=.01*Math.cos(mid);y+=.01*Math.sin(mid);yaw+=.01*k;s+=.01;
     }
     if(samples.size()<3||limit<=0)throw new IllegalStateException("Unjustified scout horizon");

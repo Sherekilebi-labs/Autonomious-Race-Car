@@ -37,7 +37,7 @@ function dashboard () {
   const sandbox = { document, window: { addEventListener: (name, fn) => (windowEvents[name] ||= []).push(fn) }, TextEncoder, console,
     performance: { now: () => now }, Date: ClockDate, WebSocket: { OPEN: 1 }, setInterval: () => 1, clearInterval () {}, setTimeout () {}, clearTimeout () {}, sent: [] }
   vm.createContext(sandbox)
-  for (const file of ['manual-control.js', 'steering-tuning.js', 'signal-monitor.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../public', file), 'utf8'), sandbox)
+  for (const file of ['manual-control.js', 'steering-tuning.js', 'signal-monitor.js', 'experiments.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../public', file), 'utf8'), sandbox)
   sandbox.packet = { mode: 'STOPPED', calibrated: false, manual_ready: true, manual_armed: false, armed: false,
     manual_max_pwm: 255, steering_limits_deg: [-26, 26], missing: ['cones.heightM'], manual_missing: [], battery_monitoring: false }
   const run = code => vm.runInContext(code, sandbox)

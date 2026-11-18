@@ -157,7 +157,7 @@ def main():
     merge(c,local)
     validate_config(c)
     c['firmwareCalibrationId']=actuator_id(c)
-    c['geometryId']=hashlib.sha256(json.dumps({'car':c['car'],'camera':{k:v for k,v in c['camera'].items() if k!='streamId'}},sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
+    c['geometryId']=hashlib.sha256(json.dumps({'car':c['car'],'cones':c['cones'],'camera':{k:v for k,v in c['camera'].items() if k!='streamId'}},sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
     header,ready=firmware_header(c)
     def unresolved(v,prefix=''):
         if c['power'].get('batteryMonitoring',True) is False and (prefix=='power.' or prefix=='hardware.batteryPin.'):

@@ -129,7 +129,12 @@ float angleFromAdc(int reading){
 }
 void reply(JsonDocument& doc,bool network,IPAddress ip,uint16_t port){
   if(network){udp.beginPacket(ip,port);serializeJson(doc,udp);udp.endPacket();}
-  else{serializeJson(doc,Serial);Serial.println();}
+  else{
+    // One buffered UART write avoids per-byte Print/driver overhead on the protocol loop.
+    char bytes[2048];size_t length=measureJson(doc);
+    if(length+1>sizeof(bytes)){applicationLoss.fetch_add(1);return;}
+    length=serializeJson(doc,bytes,sizeof(bytes));bytes[length++]='\n';Serial.write((const uint8_t*)bytes,length);
+  }
 }
 void receiveSteeringTuning(const String& text,bool serialReply,IPAddress ip,uint16_t port);
 void receive(const String& input,bool network,IPAddress ip=IPAddress(),uint16_t port=0){
@@ -351,6 +356,8 @@ void telemetry(){
 }
 void stopTask(void*){for(;;){operatorStop();acknowledgeStop();vTaskDelay(pdMS_TO_TICKS(2));}}
 void setup(){
+  // A signed command exceeds the default 256-byte UART RX ring. Drain bursts without losing frame tails.
+  Serial.setRxBufferSize(4096);Serial.setTxBufferSize(2048);
   Serial.begin(SERIAL_BAUD);serialLine.reserve(1024);bootId=String((uint32_t)esp_random(),HEX)+String((uint32_t)esp_random(),HEX);
 #if MAXBOT_ACTUATORS_READY
   const int pins[]={DRIVE_F,DRIVE_R,STEER_F,STEER_R};
@@ -389,7 +396,7 @@ void setup(){
 void loop(){
 
   // Bound protocol work so a serial/UDP flood cannot starve the 200 Hz loop.
-  for(int n=0;n<256&&Serial.available();n++){
+  for(int n=0;n<1024&&Serial.available();n++){
     char ch=Serial.read();if(ch=='\n'){receive(serialLine,false);serialLine="";}
     else if(serialLine.length()<900)serialLine+=ch;else serialLine="";
   }
@@ -411,7 +418,7 @@ void loop(){
     out["seq"]=event.seq;out["epoch"]=event.epoch;out["rx_ms"]=event.rx;out["validated_ms"]=event.validated;out["applied_ms"]=event.applied;out["expires_ms"]=event.expiry;out["pwm"]=event.pwm;
     String canonical="A|"+bootId+"|"+String(event.session)+"|"+String((long long)event.seq)+"|"+String((long long)event.epoch)+"|"+String((unsigned long long)event.rx)+"|"+String((unsigned long long)event.validated)+"|"+String((unsigned long long)event.applied)+"|"+String((unsigned long long)event.expiry)+"|"+String(event.pwm);
     if(event.reason[0]){out["reason"]=event.reason;canonical+="|"+String(event.reason);}
-    out["mac"]=hmac(canonical);if(useUdp&&peerPort)reply(out,true,peerIp,peerPort);
+    out["mac"]=hmac(canonical);reply(out,useUdp,peerIp,peerPort);
   }
   if(now-lastTelemetry>=20){lastTelemetry=now;telemetry();}
 }

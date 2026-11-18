@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="maxbot-console-version" content="0.6.1"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MaxBot · Slalom console</title><link rel="stylesheet" href="/style.css"><script src="/manual-control.js" defer></script><script src="/realtime-inputs.js" defer></script><script src="/steering-tuning.js" defer></script><script src="/signal-monitor.js" defer></script><script src="/app.js" defer></script>
+  <meta charset="utf-8"><meta name="maxbot-console-version" content="0.7.0"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MaxBot · Slalom console</title><link rel="stylesheet" href="/style.css"><script src="/manual-control.js" defer></script><script src="/realtime-inputs.js" defer></script><script src="/steering-tuning.js" defer></script><script src="/signal-monitor.js" defer></script><script src="/experiments.js" defer></script><script src="/app.js" defer></script>
 </head>
 <body>
   <header><div><h1>MaxBot</h1><span class="subtitle">Slalom console</span></div><div class="connection"><span id="connection">Disconnected</span><span id="direct-stop-status" role="status">Direct stop: unavailable</span><button id="estop" class="danger">Emergency stop <kbd>Esc</kbd></button></div></header>
@@ -71,6 +71,19 @@
         </details>
         <details class="control-delivery" open><summary>Control delivery</summary><p id="control-delivery" role="status">Waiting for phone telemetry.</p><button type="button" id="save-control-report">Save control report</button><p class="instruction">Records recent requests and phone status. New phone builds also report sent mode and ESP command acknowledgement. These do not measure motor-terminal voltage.</p></details>
       </aside>
+    </section>
+    <section class="management experiments" aria-labelledby="experiments-title">
+      <h2 id="experiments-title">Attended experiments</h2>
+      <p id="experiment-links" role="status">Connect the Pixel over USB and pair the observer phone.</p>
+      <label class="attend-label"><input id="experiment-attend" type="checkbox" disabled> I checked USB power, cleared the floor, and framed the observer. I will supervise this session.</label>
+      <p class="instruction">Session lasts 10 minutes while this dashboard stays visible. One trial runs at a time; reposition the car before another motion trial. Manual controls and Emergency stop cancel the trial.</p>
+      <div class="management-actions">
+        <div class="field"><label for="experiment-recipe">Experiment</label><select id="experiment-recipe"></select></div>
+        <div class="field"><label for="experiment-battery">Measured battery (V, optional)</label><input id="experiment-battery" type="number" min="0" max="20" step="0.01"></div>
+      </div>
+      <label for="experiment-notes">Object, floor and trial notes</label><textarea id="experiment-notes" maxlength="2000"></textarea>
+      <div class="management-actions"><button id="experiment-prepare" disabled>Prepare trial</button><button id="experiment-start" disabled>Start prepared trial</button><button id="experiment-abort" disabled>Abort trial</button></div>
+      <p id="experiment-status" role="status">No experiment prepared.</p>
     </section>
     <section class="management" aria-label="Planning and artifact management">
       <details><summary>Plan and configure</summary>

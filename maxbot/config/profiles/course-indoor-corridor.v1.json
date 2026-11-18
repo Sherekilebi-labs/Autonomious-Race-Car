@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "courseId": "indoor-white-corridor-2026-11-18",
+  "environment": {
+    "floorColor": "white",
+    "lighting": "good indoor",
+    "corridorWidthM": 2.0,
+    "corridorLengthM": 10.0,
+    "walls": true
+  },
+  "cones": {
+    "count": 4,
+    "color": "bright orange",
+    "baseDiameterM": 0.135,
+    "heightM": 0.3
+  },
+  "spacing": {
+    "rangeM": [
+      0.5,
+      1.0
+    ],
+    "definition": "center-to-center",
+    "measuredCentersRequiredPerLayout": true,
+    "clearBaseGapRangeM": [
+      0.365,
+      0.865
+    ]
+  },
+  "floorFrame": {
+    "origin": "must be measured relative to start-anchor rear axle",
+    "boundsM": null
+  },
+  "source": "Operator measurements supplied 2026-11-18; dimension values are priors until placement is verified"
+}

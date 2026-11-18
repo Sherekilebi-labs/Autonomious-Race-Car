@@ -58,7 +58,8 @@ final class VehicleLink implements AutoCloseable {
   private volatile DatagramSocket socket;
   private android.net.Network wifiNetwork;
   private InetAddress address;
-  private UsbSerialDevice serial;
+  private volatile UsbSerialDevice serial;
+  private String usbName="";
   private UsbDeviceConnection usbDevice;
   private final String session = UUID.randomUUID().toString().replace("-", "");
   private volatile String boot = "";
@@ -155,23 +156,29 @@ final class VehicleLink implements AutoCloseable {
           if (usbAction.equals(intent.getAction())) {
             UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
             if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-                && device != null) startSerial(device);
+                && device != null && matchesUsb(device) && !closed) startSerial(device);
             else listener.status(false, "USB permission denied");
           } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(intent.getAction())) {
-            connected = false;
-            listener.status(false, "USB detached; reconnect while stopped");
+            UsbDevice detached=intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+            if(detached!=null&&detached.getDeviceName().equals(usbName)) {
+              synchronized(VehicleLink.this){clearUsb();}
+              listener.status(false, "USB detached; reconnect while stopped");
+            }
           }
         }
       };
 
   private void openUsb() {
     UsbManager manager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
+    if(closed)return;
     IntentFilter filter = new IntentFilter(usbAction);
     filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
-    ContextCompat.registerReceiver(
+    if(!permissionReceiver){ContextCompat.registerReceiver(
         context, usbReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
-    permissionReceiver = true;
+    permissionReceiver = true;}
     for (UsbDevice device : manager.getDeviceList().values()) {
+      if(!matchesUsb(device))continue;
+      usbName=device.getDeviceName();
       if (manager.hasPermission(device)) startSerial(device);
       else
         manager.requestPermission(
@@ -186,7 +193,16 @@ final class VehicleLink implements AutoCloseable {
     listener.status(false, "No USB serial device attached");
   }
 
+  private boolean matchesUsb(UsbDevice device){return device.getVendorId()==config.network.usbVendorId&&device.getProductId()==config.network.usbProductId;}
+  private void clearUsb(){
+    connected=false;newest.set(null);urgent.clear();manualStopDueNs=0;motionNotBeforeNs=elapsedNs.getAsLong();
+    if(serial!=null){serial.close();serial=null;}if(usbDevice!=null){usbDevice.close();usbDevice=null;}
+    boot="";clock.invalidate();timing.reset();steeringTiming.reset();lastDeviceMs=-1;lastAckMs=-1;serialBuffer="";
+    appliedSequence=appliedEpoch=zeroSequence=-1;motionMode="";lastTxMode="";
+  }
   private synchronized void startSerial(UsbDevice device) {
+    if(closed||!matchesUsb(device))return;
+    clearUsb();usbName=device.getDeviceName();
     UsbManager manager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
     usbDevice = manager.openDevice(device);
     if (usbDevice == null) {
@@ -246,6 +262,7 @@ final class VehicleLink implements AutoCloseable {
     try {
       JSONObject m = new JSONObject(line);
       if (m.optInt("v") != 1) return;
+      if("steering_tuning_reply".equals(m.optString("type"))){listener.telemetry(m,elapsedNs.getAsLong());return;}
       long now = elapsedMs.getAsLong();
       if ("hello".equals(m.optString("type"))) {
         long deviceTime = m.getLong("time_ms");
@@ -444,6 +461,12 @@ final class VehicleLink implements AutoCloseable {
     else throw new java.io.IOException("No vehicle transport is open");
   }
 
+  synchronized void steeringRpc(JSONObject request)throws Exception {
+    if(closed||serial==null||!"usb".equals(config.network.transport))throw new java.io.IOException("USB vehicle link required");
+    if(!"steering_tuning".equals(request.optString("type"))||request.toString().length()>2048)throw new IllegalArgumentException("Only signed steering requests can be relayed");
+    if(!"get".equals(request.optString("operation"))&&(deviceManualArmed||lastAckPwm!=0))throw new IllegalStateException("Disarm before steering changes");
+    sendRaw(request.toString()); // Firmware verifies signature, boot identity, expiry and disarmed state.
+  }
   synchronized void special(String mode) {
     if(closed)return;
     newest.set(null);manualStopDueNs=0;motionNotBeforeNs=elapsedNs.getAsLong();motionMode="";zeroSequence=-1;

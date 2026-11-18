@@ -3,3 +3,5 @@ project(':robot').projectDir = file('app')
 include ':comlib'
 include ':maxbot-core'
 include ':maxbot'
+
+include ':maxbot-observer'

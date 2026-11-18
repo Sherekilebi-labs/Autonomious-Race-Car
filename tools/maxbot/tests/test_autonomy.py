@@ -8,7 +8,7 @@ def request():
     c=configure.strict_load(ROOT/'maxbot/config/profiles/app-defaults.v1.json');configure.import_calibration(c,configure.strict_load(ROOT/'firmware/calibration/calibration.json'));c['firmwareCalibrationId']=configure.actuator_id(c);c['geometryId']='b'*64
     course={'frozen':True,'mapEpoch':'fixture','frameId':'launch-rear-axle-v1','cameraId':'c'*64,'modelId':'d'*64,'cones':[{'x':x,'y':0,'observed':True,'errorBoundM':.001,'independentViews':2} for x in [2,4,6,8]]}
     m={'schemaVersion':1,'revision':1,'reviewed':True,'provenance':['SYNTHETIC HOST TEST; never deploy'],'steeringRateRadS':2.,'steeringLagS':.05,'applicationDelayS':.02,'vioLagS':.02,'accelerationMps2':.3,'brakingMps2':.5,'lateralMps2':.3,'speedPwm':[[0,0],[.1,120],[.5,200]],'validSpeedRangeMps':[0,.5]}
-    return {'schemaVersion':1,'stopped':True,'calibration':c,'vehicleModel':m,'course':course,'floorBoundsM':[-1,11,-4,4],'coneRadiusM':.1,'uncertaintyM':0,'clearanceM':.15,'taskSpeedMps':.2}
+    return {'schemaVersion':1,'stopped':True,'calibration':c,'vehicleModel':m,'course':course,'floorBoundsM':[-1,11,-4,4],'coneRadiusM':c['cones']['baseDiameterM']/2,'uncertaintyM':0,'clearanceM':.15,'taskSpeedMps':.2}
 
 def feasible_fixture(req):
     # Independent smooth wide-spacing path; analytic derivatives then arc-length samples.
@@ -22,7 +22,7 @@ class AutonomyTest(unittest.TestCase):
     def test_migration_and_private_precedence(self):
         c=request()['calibration'];baseline=copy.deepcopy(c);baseline['car']['rearOverhangM']=None
         self.assertEqual(configure.actuator_id(c),configure.actuator_id(baseline));self.assertEqual(configure.pwm_ceiling(c),170)
-        priors=configure.strict_load(ROOT/'maxbot/config/profiles/course.v1.json');self.assertEqual([p['x'] for p in priors['cones']],[1.31194,2.01194,2.71194,3.41194]);self.assertFalse(priors['observed'])
+        priors=configure.strict_load(ROOT/'maxbot/config/profiles/course.v1.json');self.assertEqual(priors['centerSpacingRangeM'],[.5,1.]);self.assertTrue(all(p['x'] is None for p in priors['cones']));self.assertFalse(priors['observed'])
         c['car']['widthM']=float('nan')
         with self.assertRaises(ValueError):configure.validate_config(c)
         c['schemaVersion']=2

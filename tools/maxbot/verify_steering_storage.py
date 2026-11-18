@@ -6,7 +6,8 @@ from configure import ROOT,strict_load
 FIELDS=['kp_milli','ki_milli','kd_milli','deadband_mdeg','min_pwm','max_pwm','filter_millihz']
 TRACE=['drive_pwm','target_mdeg','actual_mdeg','steering_pwm','p_milli','i_milli','d_milli','pot_adc']
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--port',required=True);parser.add_argument('--save-current',action='store_true');parser.add_argument('--snapshot',type=pathlib.Path);parser.add_argument('--restore',type=pathlib.Path);args=parser.parse_args()
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--port',required=True);parser.add_argument('--save-current',action='store_true');parser.add_argument('--snapshot',type=pathlib.Path);parser.add_argument('--restore',type=pathlib.Path);parser.add_argument('--save-restored',action='store_true',help='Persist the exact restored snapshot under the current calibration identity');args=parser.parse_args()
+    if args.save_restored and not args.restore:parser.error('--save-restored requires --restore')
     if args.save_current and args.restore:parser.error('Choose either --save-current or --restore')
     c=strict_load(ROOT/'maxbot.runtime.json');key=c['network']['pairingKey'].encode()
     sign=lambda text:hmac.new(key,text.encode(),hashlib.sha256).hexdigest()
@@ -45,12 +46,15 @@ def main():
                     assert not r['armed'] and r['drive_pwm']==0 and r['steering_pwm']==0,'Verification requires disarmed zero outputs'
                     r['_received']=time.monotonic();return r
             raise RuntimeError('No authenticated steering-settings response; observed types='+json.dumps(seen)+', invalid reply signatures='+str(badmac)+', observed boot count='+str(len(boots))+', diagnostics='+json.dumps(panic[:8]))
-        first=exchange();verified=False;restored=False
+        first=exchange();initial_saved=first['saved'];verified=False;restored=False
         if args.restore:
             snapshot=json.loads(args.restore.read_text());wanted=snapshot['settings'];target=dict(first);target.update({k:wanted[k] for k in FIELDS})
             if any(first[k]!=wanted[k] for k in FIELDS):
                 applied=exchange('apply',target);assert applied['status']=='applied' and all(applied[k]==wanted[k] for k in FIELDS)
                 first=exchange();assert all(first[k]==wanted[k] for k in FIELDS);restored=True
+        if args.save_restored:
+            saved=exchange('save',first);assert saved['status']=='saved' and saved['saved'] and all(saved[k]==first[k] for k in FIELDS)
+            first=exchange();assert first['saved'] and all(first[k]==wanted[k] for k in FIELDS)
         if args.save_current:
             saved=exchange('save',first);assert saved['status']=='saved' and saved['saved'] and all(saved[k]==first[k] for k in FIELDS)
             # Verify temporary Apply independently of Save, then restore the exact saved values by reset.
@@ -63,7 +67,7 @@ def main():
             fcntl.ioctl(fd,termios.TIOCMBIC,array.array('i',[termios.TIOCM_RTS]));time.sleep(1);buffer=b''
             after=exchange();assert after['boot']!=first['boot'] and after['saved'] and all(after[k]==first[k] for k in FIELDS)
             verified=True
-        report={'authenticated':True,'restoredTemporarySettings':restored,'settings':{k:first[k] for k in FIELDS},'savedBefore':first['saved'],'diagnostics':{k:first.get(k) for k in ['diagnostics_version','pid_active','target_mdeg','feedback_valid','feedback_min_mdeg','feedback_max_mdeg','feedback_rejects','command_min_mdeg','command_max_mdeg']},'temporaryApplyAndRepeatedReadsVerified':verified,'savedUnchangedAndVerifiedAfterHardwareReset':verified,'armed':False,'drivePwm':0,'steeringPwm':0,'motionSent':False,'armingSent':False}
+        report={'authenticated':True,'restoredTemporarySettings':restored,'restoredSavedBinding':args.save_restored,'settings':{k:first[k] for k in FIELDS},'savedBefore':initial_saved,'savedAfter':first['saved'],'diagnostics':{k:first.get(k) for k in ['diagnostics_version','pid_active','target_mdeg','feedback_valid','feedback_min_mdeg','feedback_max_mdeg','feedback_rejects','command_min_mdeg','command_max_mdeg']},'temporaryApplyAndRepeatedReadsVerified':verified,'savedUnchangedAndVerifiedAfterHardwareReset':verified,'armed':False,'drivePwm':0,'steeringPwm':0,'motionSent':False,'armingSent':False}
         if args.snapshot:
             args.snapshot.write_text(json.dumps(report,indent=2)+'\n');args.snapshot.chmod(0o600)
         if verified:

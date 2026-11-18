@@ -76,6 +76,7 @@ public final class Calibration {
   public static final class Network {
     public String espHost = "", dashboardUrl = "", pairingKey = "", transport = "wifi";
     public int espPort = 4242, baud = 460800;
+    public int usbVendorId = 0x10c4, usbProductId = 0xea60;
   }
 
   public static final class Commissioning {

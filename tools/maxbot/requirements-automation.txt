@@ -1,0 +1,3 @@
+# Separate analysis environment; native Android recording needs no Python dependency.
+numpy>=1.26,<3
+opencv-python>=4.10,<5

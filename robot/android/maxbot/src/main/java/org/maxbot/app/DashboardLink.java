@@ -8,7 +8,7 @@ import org.maxbot.core.Protocol;
 import java.net.*;
 import java.util.UUID;
 import java.util.concurrent.*;
-/** Wi-Fi-bound, authenticated AP discovery and reconnect. No reconnect grants motion authority. */
+/** Wi-Fi-bound, explicit endpoint pairing with legacy AP discovery and reconnect. No reconnect grants motion authority. */
 final class DashboardLink extends WebSocketListener implements AutoCloseable {
   interface Listener {void command(JSONObject message);void disconnected();}
   private final String key,configuredUrl;private final Listener listener;private final Context context;private final java.util.function.LongSupplier elapsedMs;private volatile long attemptStartedMs;
@@ -16,6 +16,7 @@ final class DashboardLink extends WebSocketListener implements AutoCloseable {
   private volatile OkHttpClient client;private volatile WebSocket socket;private volatile boolean authenticated,closed,connecting;
   private final java.util.concurrent.ConcurrentHashMap<String,CompletableFuture<JSONObject>> transfers=new java.util.concurrent.ConcurrentHashMap<>();
   private final ClockSync hostClock=new ClockSync();private volatile long lastProbe;private long lastClockProbe=-1;private volatile long lastManualReceivedMs=-1,lastManualBudgetMs;
+  private String signingSession="";private long inboundSequence=-1,outboundSequence;
   private volatile String operatorSession="",manualTransport="websocket";private long lastManualEvent=-1;
   DashboardLink(Context c,String url,String key,Listener listener){this(c,url,key,listener,SystemClock::elapsedRealtime,true);}
   DashboardLink(Context c,String url,String key,Listener listener,java.util.function.LongSupplier elapsedMs,boolean autoConnect){this.context=c;this.key=key;this.configuredUrl=url;this.listener=listener;this.elapsedMs=elapsedMs;if(autoConnect)worker.scheduleWithFixedDelay(this::connect,0,2,TimeUnit.SECONDS);}
@@ -26,16 +27,22 @@ final class DashboardLink extends WebSocketListener implements AutoCloseable {
     try{
       android.net.Network network=WifiBinding.network(context);if(network==null)throw new java.io.IOException("Wi-Fi unavailable");
       String url;
-      try { url=discover(); }
+      try { url=configuredUrl.isEmpty()?discover():endpoint(configuredUrl); }
       catch(Exception discoveryError) {
         if(configuredUrl.isEmpty())throw discoveryError;
-        url=configuredUrl;
+        url=endpoint(configuredUrl);
       }
       if(client!=null){client.dispatcher().executorService().shutdown();client.connectionPool().evictAll();}
       client=new OkHttpClient.Builder().socketFactory(network.getSocketFactory()).pingInterval(2,TimeUnit.SECONDS).build();
       socket=client.newWebSocket(new Request.Builder().url(url).build(),this);
     }catch(Exception e){connecting=false;listener.disconnected();}
   }
+  static String endpoint(String value) throws java.net.URISyntaxException {
+    java.net.URI uri=new java.net.URI(value.trim());
+    if(!java.util.List.of("ws","wss").contains(uri.getScheme())||uri.getHost()==null||uri.getUserInfo()!=null||uri.getFragment()!=null||uri.getQuery()!=null||!"/robot".equals(uri.getPath()))throw new IllegalArgumentException("Use ws://MAC_LAN_ADDRESS:8081/robot or wss://HOST/robot");
+    return uri.toString();
+  }
+  boolean authenticated(){return authenticated;}
   private String discover()throws Exception {
     try(DatagramSocket udp=new DatagramSocket()){
       WifiBinding.bind(context,udp);udp.setSoTimeout(500);udp.setBroadcast(true);
@@ -53,9 +60,15 @@ final class DashboardLink extends WebSocketListener implements AutoCloseable {
   public void onMessage(WebSocket ws,String text){
     if(closed||ws!=socket||text.length()>65536)return;
     try{
-      JSONObject m=new JSONObject(text);String type=m.optString("type");
-      if("challenge".equals(type))ws.send(new JSONObject().put("type","auth").put("role","robot").put("mac",Protocol.sign(key,"AUTH|robot|"+m.getString("nonce"))).toString());
-      else if("authenticated".equals(type)){authenticated=true;connecting=false;probe();}
+      JSONObject m=new JSONObject(text);
+      if(authenticated){
+        String payload=m.optString("payload");long sequence=m.optLong("sequence",-1);
+        if(!"signed_message".equals(m.optString("type"))||!signingSession.equals(m.optString("session_id"))||sequence<=inboundSequence||!SessionMessages.verify(key,"S",signingSession,sequence,payload,m.optString("mac")))return;
+        inboundSequence=sequence;m=new JSONObject(payload);
+      }
+      String type=m.optString("type");
+      if("challenge".equals(type))ws.send(new JSONObject().put("type","auth").put("role","robot").put("control_signing",1).put("mac",Protocol.sign(key,"AUTH|robot|"+m.getString("nonce")+"|signed-v1")).toString());
+      else if("authenticated".equals(type)){if(m.optInt("control_signing")!=1)throw new SecurityException("Updated signed dashboard required");signingSession=m.getString("session_id");inboundSequence=-1;outboundSequence=0;authenticated=true;connecting=false;probe();}
       else if(authenticated&&"clock_sample".equals(type)&&m.getLong("t1")==lastProbe){sampleClock(m);}
       else if(authenticated&&"export_ack".equals(type)){CompletableFuture<JSONObject> waiter=transfers.remove(m.optString("request_id"));if(waiter!=null)waiter.complete(m);}
       else if(authenticated){
@@ -63,6 +76,13 @@ final class DashboardLink extends WebSocketListener implements AutoCloseable {
         if("operator_left".equals(type)){setOperatorSession("");}
         if("manual".equals(m.optString("action"))){
           deliverManual(m,false);return;
+        }
+        if("experiment".equals(type)&&!"abort".equals(m.optString("operation"))){
+          long now=elapsedMs.getAsLong();double bound=hostClock.uncertaintyMs(now);
+          if(!Double.isFinite(bound)||bound>75)return;
+          long remote=m.getLong("deadline_ms"),local=hostClock.toLocal(remote)-(long)Math.ceil(bound);
+          if(local<=now||local>now+300)return;
+          m.put("mapped_deadline_ns",Long.toString(local*1_000_000L));
         }
         listener.command(m);
       }
@@ -114,9 +134,10 @@ final class DashboardLink extends WebSocketListener implements AutoCloseable {
     if(!authenticated)throw new java.io.IOException("Dashboard disconnected");String id=UUID.randomUUID().toString();CompletableFuture<JSONObject> result=new CompletableFuture<>();transfers.put(id,result);
     try{send(message.put("request_id",id));JSONObject ack=result.get(10,TimeUnit.SECONDS);if("failed".equals(ack.optString("status")))throw new java.io.IOException(ack.optString("message"));return ack;}finally{transfers.remove(id);}
   }
-  private void probe(){try{lastProbe=elapsedMs.getAsLong();if(socket!=null)socket.send(new JSONObject().put("type","clock_probe").put("t1",lastProbe).toString());}catch(Exception ignored){}}
-  void send(JSONObject message){if(authenticated&&socket!=null){if(elapsedMs.getAsLong()-lastProbe>500)probe();if("telemetry".equals(message.optString("type"))&&socket.queueSize()>16*1024)return;if(!socket.send(message.toString()))failed(socket);}}
-  boolean sendTrace(JSONObject message){WebSocket current=socket;return authenticated&&current!=null&&current.queueSize()<16*1024&&current.send(message.toString());}
+  private synchronized String signed(JSONObject message){try{String payload=message.toString();long sequence=++outboundSequence;return new JSONObject().put("type","signed_message").put("session_id",signingSession).put("sequence",sequence).put("payload",payload).put("mac",SessionMessages.sign(key,"C",signingSession,sequence,payload)).toString();}catch(Exception e){return "{}";}}
+  private synchronized void probe(){try{lastProbe=elapsedMs.getAsLong();if(socket!=null)socket.send(signed(new JSONObject().put("type","clock_probe").put("t1",lastProbe)));}catch(Exception ignored){}}
+  synchronized void send(JSONObject message){if(authenticated&&socket!=null){if(elapsedMs.getAsLong()-lastProbe>500)probe();if("telemetry".equals(message.optString("type"))&&socket.queueSize()>16*1024)return;if(!socket.send(signed(message)))failed(socket);}}
+  synchronized boolean sendTrace(JSONObject message){WebSocket current=socket;return authenticated&&current!=null&&current.queueSize()<16*1024&&current.send(signed(message));}
   private void failed(WebSocket ws){if(closed||ws!=socket)return;socket=null;authenticated=false;connecting=false;setOperatorSession("");hostClock.invalidate();listener.disconnected();}
   public void onFailure(WebSocket ws,Throwable error,Response response){failed(ws);}
   public void onClosing(WebSocket ws,int code,String reason){failed(ws);ws.close(code,reason);}

@@ -12,7 +12,7 @@ Use a stochastic optimizer to propose parameter vectors between runs. Record the
 
 ## 2. Course and validity contract
 
-Four 200 mm diameter, 150 mm high bright-orange cones stand in a straight row with 500 mm edge gaps, or 700 mm center spacing. Start dead-center on the row, front bumper 1 m from the first near edge. Pass the car right, left, right, left. Use one-sided scout → stop/freeze map → Mac plans → manual reposition → localization verification → timed run, as commanded on the Mac. Preserve the camera mount and localization session; a reset or unexplained map shift invalidates the reference.
+Updated 18 November 2026: four bright-orange cones have 135 mm base diameter and 300 mm height. The white-floor indoor corridor is 2 m wide and 10 m long, with good indoor lighting and walls. Cone spacing is adjustable from 0.5 to 1.0 m **center to center**, giving 0.365–0.865 m clear base gaps. Record actual measured centers for each layout; do not reuse a reference after moving cones. Start dead-center on the row, front bumper 1 m from the first near edge. Pass the car right, left, right, left. Use one-sided scout → stop/freeze map → Mac plans → manual reposition → localization verification → timed run, as commanded on the Mac. Preserve the camera mount and localization session; a reset or unexplained map shift invalidates the reference.
 
 Score from the phone's accepted timed-run start to full-body clearance of cone 4, including launch delay. Save physical-motion start, every cone crossing, finish and braking completion separately. Crossing timestamps are interpolated estimates with uncertainty; do not confuse delayed detection arrival with the instant of passage.
 
@@ -71,7 +71,7 @@ Fit parameters with bounded robust regression and retain residual distributions 
 
 ## 5. Stage B: establish a feasible conservative baseline
 
-Solve the observed course on the Mac using full vehicle/cone geometry, calibrated wheel limits and measured steering rate. Optimize approach heading and longitudinal pass location, then retime for acceleration, braking and steering response. Validate the continuous swept path and phone-compatible reference artifact. The current zero-heading quintic waypoint family fails the nominal 700 mm layout with its existing offset/margin, so do not optimize controller gains around that infeasible reference. Failure of this family or a local optimizer does not establish that the course itself is impossible.
+Solve the observed course on the Mac using full vehicle/cone geometry, calibrated wheel limits and measured steering rate. Optimize approach heading and longitudinal pass location, then retime for acceleration, braking and steering response. Validate the continuous swept path and phone-compatible reference artifact. For the earlier 200 mm cone course, the zero-heading quintic waypoint family failed the nominal 700 mm layout with its existing offset/margin. Re-evaluate feasibility for the updated 135 mm cones and each measured spacing before optimizing controller gains around a new reference. Failure of this family or a local optimizer does not establish that the course itself is impossible.
 
 Use exact oriented-footprint/swept-path clearance checks and a validated uncertainty margin. Keep actuator limits, contact constraints, operator supervision and stop logic outside the tunable vector. Unknown grip or stopping measurements are not high-speed defaults.
 

@@ -66,6 +66,13 @@ async function main () {
       const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false})
       await fs.writeFile('.tools/wasd-review/'+name+'.png',Buffer.from(shot.data,'base64'))
     }
+    for(const [name,width,height] of [['experiment-desktop',1440,1100],['experiment-mobile',390,900]]){
+      await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false})
+      await evaluate('document.querySelector(".experiments").scrollIntoView({block:"start"})');await delay(100)
+      assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true)
+      assert.ok(await evaluate('document.getElementById("experiment-recipe").options.length>=8'))
+      const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await fs.writeFile('.tools/wasd-review/'+name+'.png',Buffer.from(shot.data,'base64'))
+    }
     await evaluate('document.getElementById("steering-tuning").open=false')
     await evaluate('document.querySelector("[data-action=arm_manual]").click()'); await delay(120)
     assert.equal(await evaluate('document.getElementById("manual-control").dataset.ready'), 'true')

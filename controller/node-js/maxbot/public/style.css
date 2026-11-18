@@ -25,3 +25,7 @@ header{position:sticky;top:0;z-index:10}.viewport{height:min(52vh,560px);min-hei
 .steering-tuning{scroll-margin-top:140px}
 
 .collision-warning{scroll-margin-top:140px;display:flex;flex-direction:column;gap:4px;padding:14px 16px;border:1px solid var(--line,#cbd4dc);border-radius:6px;margin:12px 0;background:#f5f7f9}.collision-warning strong{font-size:18px}.collision-warning span{font-size:13px;color:#4c606e}.collision-warning[data-state="warning"]{background:#fff0f1;border-color:#ae1829;color:#8f1422}.collision-warning[data-state="warning"] span{color:#8f1422}.signal-monitor{margin:20px 0;padding:20px 0;border-top:1px solid #cbd4dc;border-bottom:1px solid #cbd4dc}.signal-monitor textarea{display:block;width:100%;box-sizing:border-box;margin:8px 0 12px;resize:vertical}.signal-actions{display:flex;gap:8px;flex-wrap:wrap}.signal-monitor p{overflow-wrap:anywhere}.signal-monitor label{font-weight:600;font-size:14px}.signal-monitor .section-title{margin-bottom:8px}
+
+.experiments .attend-label{display:flex;align-items:flex-start;gap:12px;max-width:75ch;line-height:1.6}.experiments .attend-label input{min-height:24px;min-width:24px;margin-top:2px}.experiments>p{max-width:75ch;line-height:1.6}.experiments textarea{width:min(100%,700px)}.experiments input[type=number]{width:140px}.experiments h2{margin-bottom:12px}
+.experiments .management-actions>.field{min-width:0;max-width:100%;flex:1 1 260px}.experiments select{width:100%;min-width:0;max-width:100%}
+.experiments{scroll-margin-top:140px}

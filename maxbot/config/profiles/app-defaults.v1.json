@@ -38,8 +38,8 @@
     "headingErrorRad": null
   },
   "cones": {
-    "heightM": 0.15,
-    "baseDiameterM": 0.2,
+    "heightM": 0.3,
+    "baseDiameterM": 0.135,
     "count": 4
   },
   "power": {
@@ -85,7 +85,7 @@
     "espPort": 4242,
     "dashboardUrl": "",
     "pairingKey": "",
-    "baud": 460800
+    "baud": 921600
   },
   "hardware": {
     "driveForwardPin": 4,

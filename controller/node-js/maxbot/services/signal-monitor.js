@@ -16,7 +16,7 @@ class SignalMonitoring {
   request (m) {
     this.operations = this.operations.catch(() => {}).then(async () => {
       if (m.operation === 'start') await this.start(m.options || {})
-      else if (m.operation === 'stop') this.stop('operator_stop')
+      else if (m.operation === 'stop') this.stop(['experiment_completed','experiment_aborted'].includes(m.reason)?m.reason:'operator_stop')
       else if (m.operation === 'status') this.publish(this.current())
       else if (m.operation === 'events' && Array.isArray(m.events) && m.events.length <= 32) {
         for (const event of m.events) if (event && typeof event.type === 'string') {
@@ -85,7 +85,7 @@ class SignalMonitoring {
   }
   telemetry (m) {
     if (!this.active) return
-    const fields = ['type', 'time_ns', 'mode', 'armed', 'manual_armed', 'pwm', 'mcu_pwm', 'steering_deg', 'target_steering_deg', 'fault', 'mcu_fault', 'vehicle_control', 'dashboard_control', 'stream', 'collision_warning', 'thermal_limited', 'clock_uncertainty_ms', 'mcu_deadline_rejected', 'mcu_application_loss', 'wifi_latency_mode', 'control_max_gap_ms', 'camera_capabilities', 'recording_drops', 'steering_onset_ms', 'steering_settling_ms', 'steering_onset_samples', 'steering_settling_samples', 'steering_censored', 'steering_timing_definition']
+    const fields = ['type', 'time_ns', 'mode', 'armed', 'manual_armed', 'pwm', 'mcu_pwm', 'steering_deg', 'target_steering_deg', 'fault', 'mcu_fault', 'vehicle_control', 'dashboard_control', 'stream', 'collision_warning', 'thermal_limited', 'thermal_status', 'experiment_thermal_policy', 'experiment_allow_severe_thermal', 'clock_uncertainty_ms', 'mcu_deadline_rejected', 'mcu_application_loss', 'wifi_latency_mode', 'control_max_gap_ms', 'camera_capabilities', 'recording_drops', 'steering_onset_ms', 'steering_settling_ms', 'steering_onset_samples', 'steering_settling_samples', 'steering_censored', 'steering_timing_definition']
     this.append('telemetry', Object.fromEntries(fields.filter(k => Object.hasOwn(m, k)).map(k => [k, m[k]])))
   }
   stop (reason) {

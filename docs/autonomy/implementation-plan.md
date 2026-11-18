@@ -23,15 +23,15 @@ Opening the phone app automatically loads the last valid settings, connects, war
 | Front / rear overhang | 0.03894 m / 0.055 m; rear value supplied in this conversation |
 | Wheel steering | −26° right, +26° left; positive angles turn left |
 | Camera location | Rear-axle origin: forward 0.06094 m, left 0.05090 m, up 0.09924 m |
-| Cones | Four bright-orange cones, diameter 0.200 m, height 0.150 m |
-| Cone spacing | **0.500 m edge to edge**, therefore 0.700 m center to center |
+| Cones | Updated 18 November 2026: four bright-orange cones, base diameter 0.135 m, height 0.300 m |
+| Cone spacing | Adjustable **0.500–1.000 m center to center**; record actual centers per layout |
 | Launch distance | Front bumper to the first cone's nearest edge: 1.000 m |
-| Environment | Large indoor hallway, yellowish textured wood, indoor lighting; no nearby obstacles reported |
+| Environment | Updated 18 November: white floor, good indoor lighting, 2 m × 10 m corridor with walls |
 | Data collection | Robot's own camera, IMU, commands and telemetry; optional external slow-motion validation |
 
-With the starting rear axle at `(0,0)` and the cone row along `+x`, the nominal centers are `(1.31194,0)`, `(2.01194,0)`, `(2.71194,0)`, `(3.41194,0)` meters. These follow from `0.173 + 0.03894 + 1.000 + 0.100`, then 0.700 m increments. Use these as course priors; scout observations establish actual locations and uncertainty.
+The corridor is 2 m wide and 10 m long with walls, white flooring and good indoor lighting. Measure its bounds in the start-anchor frame. The earlier nominal centers `(1.31194,0)` through `(3.41194,0)` belong to the superseded 200 mm cone layout and must not be used for the new course. The current course profile leaves coordinates unset until each placement is measured; scout observations establish actual locations and uncertainty.
 
-Remaining measurements: camera pitch/yaw and confirmation that the mount matches the saved offsets; actual usable hallway width and finish stopping area; loaded steering dynamics; PWM/speed, acceleration, braking and grip. Cone base diameter must describe the entire collision footprint; verify whether any square flange extends beyond the reported 200 mm. These do not require repeating the already successful direction and steering-table calibration. The user's working hardware takes precedence over stale documentation, but an unknown dynamics measurement must not be invented.
+Remaining measurements: camera pitch/yaw and confirmation that the mount matches the saved offsets; corridor bounds in the start-anchor frame and usable finish stopping area; loaded steering dynamics; PWM/speed, acceleration, braking and grip. Cone base diameter must describe the entire collision footprint; verify whether any square flange extends beyond the reported 135 mm. These do not require repeating the already successful direction and steering-table calibration. The user's working hardware takes precedence over stale documentation, but an unknown dynamics measurement must not be invented.
 
 The saved calibration still contains false commissioning flags despite working steering and traction. Reconcile those records explicitly during implementation. A verified direction or electrical brake does not itself measure floor stopping distance. Preserve the user's disabled battery monitoring and absent physical stop switch; neither is a reason to introduce a new sensor requirement.
 

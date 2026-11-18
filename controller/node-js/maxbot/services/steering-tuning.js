@@ -13,11 +13,11 @@ function validSettings (m) {
 }
 /** Mac-to-ESP settings only. No arm/drive operations; replies require the pairing key. */
 class SteeringTuning {
-  constructor ({ key, host = '192.168.4.1', port = 4245, clock = Date.now }) {
-    this.key = key; this.host = host; this.port = port; this.clock = clock; this.pending = null; this.closed = false
+  constructor ({ key, host = '192.168.4.1', port = 4245, clock = Date.now, relay = null }) {
+    this.relay = relay; this.key = key; this.host = host; this.port = port; this.clock = clock; this.pending = null; this.closed = false
     this.socket = dgram.createSocket('udp4'); this.socket.unref()
     this.socket.on('error', error => this.pending?.finish(error))
-    this.socket.on('message', (bytes, remote) => {
+    this.receive = (bytes, remote = { address: this.host, port: this.port }) => {
       const pending = this.pending
       if (!pending || remote.address !== this.host || remote.port !== this.port || bytes.length > 2048) return
       try {
@@ -36,7 +36,8 @@ class SteeringTuning {
         this.offset = m.time_ms - (received + pending.started) / 2; this.uncertainty = rtt / 2 + 1; this.received = received
         pending.finish(null, { ...this.device, round_trip_ms: rtt })
       } catch { /* Malformed and unsigned replies never acknowledge a change. */ }
-    })
+    }
+    this.socket.on('message', (bytes, remote) => this.receive(bytes, remote))
   }
   exchange (operation, settings) {
     if (this.closed) return Promise.reject(new Error('Steering connection closed'))
@@ -48,8 +49,8 @@ class SteeringTuning {
     m.mac = sign(this.key, requestText(m)); const bytes = Buffer.from(JSON.stringify(m))
     return new Promise((resolve, reject) => {
       const finish = (error, result) => { if (this.pending?.id !== id) return; clearInterval(retry); clearTimeout(timeout); this.pending = null; error ? reject(error) : resolve(result) }
-      const send = () => { if (!this.closed) this.socket.send(bytes, this.port, this.host, error => { if (error) finish(error) }) }
-      const retry = setInterval(send, 180), timeout = setTimeout(() => finish(new Error('ESP32 steering settings unavailable. Join ESP Wi-Fi and install the tuning firmware.')), 1200)
+      const send = () => { if (!this.closed) { if (this.relay && this.relay(m)) return; this.socket.send(bytes, this.port, this.host, error => { if (error) finish(error) }) } }
+      const retry = setInterval(send, 180), timeout = setTimeout(() => finish(new Error('ESP32 steering settings unavailable. Check the selected USB/Wi-Fi vehicle link.')), 1200)
       this.pending = { id, operation, boot: m.boot, settings, started: now, finish }; send()
     })
   }

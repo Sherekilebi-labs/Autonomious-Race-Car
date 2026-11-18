@@ -2,7 +2,7 @@
 
 const $ = id => document.getElementById(id)
 let socket, paired = false, robot = false, seq = 0, latest = null, peer = null, candidates = [], held = false, heartbeatTimer, lastTelemetry = 0, sessionId = "", eventId = 0
-let steeringPanel = null, signalPanel = null
+let steeringPanel = null, signalPanel = null, experimentPanel = null
 let inputId = 0, inputStamp = { input_id: 0, input_ms: Date.now(), input_perf_ms: performance.now() }
 function noteInput (code, down) { inputStamp = { input_id: ++inputId, input_ms: Date.now(), input_perf_ms: performance.now() }; signalPanel?.record({ type: 'raw_input', code, down, ...inputStamp }) }
 let realtime = null, rtcSigner = null, streamTimer, streamStats = {}, previousVideoStats = null
@@ -53,7 +53,8 @@ $('pair').addEventListener('submit', event => {
     try {
       const m = JSON.parse(event.data)
       if (m.type === 'challenge') socket.send(JSON.stringify({ type: 'auth', role: 'operator', mac: await mac(key, `AUTH|operator|${m.nonce}`) }))
-      else if (m.type === 'authenticated') { paired = true; robot = m.robot; sessionId=m.session_id; eventId=0; $('key').value = ''; $('pair-status').textContent = 'Paired. Connect the phone to this computer’s LAN address.'; heartbeatTimer = setInterval(() => { if (!document.hidden) send({ type: 'heartbeat' }) }, 100); send({ type: 'heartbeat' }); send({ type: 'signal_monitor', operation: 'status' }) }
+      else if (m.type === 'authenticated') { paired = true; robot = m.robot; sessionId=m.session_id; eventId=0; $('key').value = ''; $('pair-status').textContent = 'Dashboard paired. On the Pixel, set Connection settings to this Mac’s LAN address.'; heartbeatTimer = setInterval(() => { if (!document.hidden) send({ type: 'heartbeat' }) }, 100); send({ type: 'heartbeat' }); send({ type: 'signal_monitor', operation: 'status' }); send({ type: 'experiment', operation: 'status' }) }
+      else if (m.type === 'experiment_status' || m.type === 'observer_status') experimentPanel?.receive(m)
       else if (m.type === 'signal_monitor_status' || m.type === 'collision_warning') signalPanel?.receive(m)
       else if (m.type === 'robot_connected') { robot = true; signalPanel?.resetFrames() }
       else if (m.type === 'robot_disconnected') { signalPanel?.resetFrames(); robot = false; release(); closeVideo() }
@@ -76,7 +77,7 @@ $('pair').addEventListener('submit', event => {
 
 function cleanup () {
   for(const waiter of artifactWaiters.values()){clearTimeout(waiter.timer);waiter.reject(new Error('Dashboard disconnected; stage a fresh set'))}artifactWaiters.clear();stagedTransaction=null;stagedManifest=null;delete $('activate').dataset.ready
-  signalPanel?.disconnected(); release(); clearInterval(heartbeatTimer); paired = false; robot = false; rtcSigner = null
+  experimentPanel?.disconnected(); signalPanel?.disconnected(); release(); clearInterval(heartbeatTimer); paired = false; robot = false; rtcSigner = null
   if (socket) { socket.onclose = null; socket.close(); socket = null }
   closeVideo(); availability()
 }
@@ -249,6 +250,7 @@ $('collect').addEventListener('change', () => command('collection', { enabled: $
 
 const fixed = (value, places = 2) => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(places) : '—'
 function render (m) {
+  experimentPanel?.telemetry(m)
   if (m.collision_warning) signalPanel?.warning(m.collision_warning)
   $('mode').textContent = m.mode || 'UNKNOWN'
   const fields = ['mode','armed','manual_armed','manual_input_ms','manual_link_ms','vehicle_connected','mcu_fault','link','fault','pwm','target_steering_deg','steering_deg','clock_uncertainty_ms','mcu_deadline_rejected','mcu_application_loss','timing_application_age_ms','mcu_pwm','wifi_latency_mode','control_age_ms','control_max_gap_ms']
@@ -317,6 +319,7 @@ $('screenshot').addEventListener('click', () => {
 })
 setInterval(availability, 100)
 steeringPanel = new SteeringPanel(send)
+experimentPanel = new ExperimentPanel(send)
 signalPanel = new SignalPanel(send, () => ({ drive_rate: Number($('drive-rate').value), steering_rate: Number($('steering-rate').value), stream: streamStats, input_transport: realtime?.stats() }))
 drawMap({}); availability()
 

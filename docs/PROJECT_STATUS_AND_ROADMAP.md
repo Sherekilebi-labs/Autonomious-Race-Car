@@ -1,6 +1,6 @@
 # MaxBot — implementation status, evidence and roadmap
 
-Updated **17 November 2026**, Asia/Dubai. This is the project handoff for the latest source checkpoint. It consolidates the implementation, hardware work, experiments, operational instructions and remaining plans. Detailed linked records remain the authority for individual measurements.
+Updated **18 November 2026**, Asia/Dubai. This is the project handoff for the latest source checkpoint. It consolidates the implementation, hardware work, experiments, operational instructions and remaining plans. Detailed linked records remain the authority for individual measurements.
 
 ## Current state
 
@@ -10,9 +10,9 @@ MaxBot is a local Pixel 5 + classic ESP32 control system for an indoor 1:16 car.
 | --- | --- |
 | Confirmed manual recovery point | Git tag `manual-control-v0.4.0-working`; operator-confirmed on 14 November |
 | Most recent recorded floor run | App `0.6.0-signal-monitor`, version code 10; 16 November, reported 12 V supply |
-| Latest source / APK | `0.6.1-timing-fix`, version code 11; builds, unit tests and lint pass |
+| Latest source / APK | `0.7.0-experiments`, version code 12; USB/shared-Wi-Fi experiment build; device validation pending |
 | Latest timing corrections on Pixel | Prepared; the short camera-clock validation recording is still pending |
-| ESP runtime firmware | Flashed and authenticated over USB on 16 November; unchanged by the subsequent APK timing correction |
+| ESP runtime firmware | USB acknowledgement fix flashed 18 November; 921600 baud; exact saved steering settings preserved; zero-output USB bench verified |
 | Physical traction onset | Not measured by a rotation sensor or synchronized external video |
 | Autonomous course completion | Not commissioned or physically validated |
 
@@ -28,7 +28,7 @@ MaxBot is a local Pixel 5 + classic ESP32 control system for an indoor 1:16 car.
 - No wheel encoder or physical stop switch is configured. Software stop, emergency-stop, freshness and watchdog paths remain active.
 - Positive steering means left; negative means right. Calibrated command limits are −26° to +26°.
 - Recorded geometry includes 173 mm wheelbase, 144 mm overall width, 127 mm tire-center spacing, 38.94 mm front overhang and 55 mm rear overhang. Camera lens offsets from the rear axle are +60.94 mm forward, +50.90 mm left and 99.24 mm high.
-- Course priors: four cones, 200 mm base diameter, 150 mm height, 500 mm edge gaps, 1 m bumper launch gap; first pass to the right. Priors are not observed map landmarks.
+- Course priors: four bright-orange cones, 135 mm base diameter, 300 mm height, adjustable 0.5–1 m center spacing, 1 m bumper launch gap; first pass to the right. White indoor floor, good lighting, 2 m × 10 m walled corridor. Priors are not observed map landmarks.
 
 Camera pitch/yaw, stream binding, IMU alignment/bias/lever arm, empirical localization error, floor bounds and vehicle dynamics still require appropriate measurements before autonomy. See [calibration parameters](calibration-parameters.md), [measurement history](../firmware/calibration/geometry-measurements.json) and [configuration contracts](../maxbot/config/CONTRACTS.md).
 
@@ -192,7 +192,7 @@ sh dist/signal-monitor/start-mac.command
 
 Open `http://localhost:8081` and pair with the configured car key. Keep the launcher Terminal open; Ctrl+C stops it. If port 8081 is occupied, stop the existing identified MaxBot instance before starting a second one. The older private `start-dashboard.command` / `stop-dashboard.command` manage a different host launcher; do not mix the two launchers simultaneously.
 
-Both Mac and Pixel must join **MaxBot-Drive** for the current AP setup. A Mac on its normal internet Wi-Fi cannot discover the Pixel on the isolated ESP subnet. Stay connected despite the no-internet notice. “Authenticated vehicle link” on the Pixel proves Pixel↔ESP connectivity, not Pixel↔Mac connectivity. Live data on the Mac confirms the latter. Once local assets are installed, runtime does not need internet; GitHub/tool work can be done after returning the Mac to an internet network.
+For legacy 0.6.x AP operation, both Mac and Pixel must join **MaxBot-Drive**. The 0.7 USB/shared-Wi-Fi setup uses [these new instructions](autonomy/usb-experiments.md). A Mac on its normal internet Wi-Fi cannot discover the Pixel on the isolated ESP subnet. Stay connected despite the no-internet notice. “Authenticated vehicle link” on the Pixel proves Pixel↔ESP connectivity, not Pixel↔Mac connectivity. Live data on the Mac confirms the latter. Once local assets are installed, runtime does not need internet; GitHub/tool work can be done after returning the Mac to an internet network.
 
 ### Fresh source checkout
 
@@ -252,7 +252,7 @@ The installed Gradle/SDK combination emits compatibility/deprecation warnings, a
 
 | Priority | Work | Acceptance evidence |
 | --- | --- | --- |
-| P0 | Install collector 0.6.1 and make a 10-second stationary, disarmed capture | Actual Android-camera/CPU timestamp correspondence or enough raw evidence to diagnose failure; zero trace gaps; ordered Mac frames |
+| P0 | Install 0.7 (including the 0.6.1 clock correction) and make a 10-second stationary, disarmed capture | Actual Android-camera/CPU timestamp correspondence or enough raw evidence to diagnose failure; zero trace gaps; ordered Mac frames |
 | P0 | Measure physical traction onset | 10 isolated forward and 10 reverse starts, full stops and ≥3 s between trials, session JSON plus synchronized high-frame-rate wheel/input-witness footage or encoder data |
 | P0 | Validate warning recognition | 20 isolated entries/exits of one identifiable object, stationary/disarmed car, retained source imagery and labels for missed/spurious warnings |
 | P1 | Reduce and explain video latency | Add minimum/target jitter-buffer, transport/retransmission and presentation diagnostics; compare lower bitrate, monitoring load and YOLO load one at a time; obtain glass-to-glass evidence |
@@ -273,3 +273,33 @@ The upstream OpenBot repository remains a reference remote. Publish MaxBot check
 Private runtime configuration, generated calibration headers/assets, compiled credential-bearing APK/firmware bundles, local tool caches and raw root-level `maxbot-signals-*` exports are ignored. The Git snapshot includes only public model assets, source, examples, test fixtures and reviewed summaries. A fresh checkout needs the operator's private measured configuration to reproduce this specific car deployment.
 
 Do not mark autonomous operation, capture timing, collision-detection reliability or physical motor onset as validated until the corresponding acceptance evidence exists.
+
+## 18 November: USB/MCP experiment implementation
+
+See [USB experiments and setup](autonomy/usb-experiments.md). The new MaxBot 0.7 APK defaults to USB serial and explicit shared-Wi-Fi dashboard pairing. A separate Android observer app records timestamped original video and uploads hash-checked evidence. The Mac exposes a local MCP service, attended bounded trial recipes, automatic signal reports/analysis, reviewed dynamics fitting and bounded policy-search proposals. Signed session messages protect the phone links. Manual takeover and existing motor deadlines remain authoritative. No unattended floor driving or automatic candidate promotion is enabled.
+
+The updated course has four bright-orange **135 mm diameter × 300 mm high cones**, **0.5–1 m center spacing**, a white indoor floor with good lighting, and a **2 m × 10 m walled corridor**. Actual cone coordinates and corridor bounds in the robot frame remain per-layout measurements. Cone geometry now contributes to configuration identity, so the older course's references must be regenerated.
+
+Read-only Mac USB bench verification on 18 November authenticated the existing firmware and actuator calibration across 50 settings replies: disarmed, zero traction/steering outputs, valid feedback, unchanged saved settings. The USB settings-request RTT was 31.446 ms median / 37.017 ms p95; this is neither Pixel USB timing nor motor onset. No arm, drive, reset or configuration-write request was sent. A later review found that the old firmware omitted USB application acknowledgements. The connected ESP was flashed with that fix at 921600 baud and the exact saved steering settings were preserved under its new configuration identity. Its AP remains available with the matching 0.7 APK while Pixel USB is commissioned.
+
+Remaining hardware gates: Pixel USB host permission and board power/throughput, observer Camera2/encoder mode compatibility and framing, enterprise LAN peer reachability, physical timing endpoint validation, camera/IMU geometry, braking/grip and reviewed repeated slalom runs. The new software packages do not establish these measurements.
+
+The final serial-loop correction passed **150/150** signed zero-output DISARM acknowledgements at **49.922 Hz**, with zero increase in application-loss and motor-overrun counters. Mac command-send → signed application-reply RTT was **26.092 ms median / 28.338 ms p95**. These endpoints exclude Pixel and physical movement. See the [USB migration bench review](autonomy/reports/2026-11-18-usb-migration-review.md).
+
+Observer follow-up: the operator installed `0.7.1-preview-fix` and confirmed improved proportions but reported a remaining 90° rotation error. `0.7.2-rotation-fix` adds sensor/display-aware preview transforms and copies the rendered viewport for remote snapshots, so phone and remote images share their orientation. Build, lint and four host geometry tests pass. The 0.7.2 APK is packaged; installation and physical visual verification remain pending because no ADB device was available. Native recording geometry still requires a test clip before calibration.
+
+
+## 18 November: first attended timing attempts
+
+The user deferred slalom tuning and requested very short pulses because of the observer's narrow field of view; the onboard Pixel camera is partly occluded by the black body. The coordinator now accepts `parameters.pulse_ms` from 20–1000 ms, shortening powered segments without extending a recipe's budget or changing its neutral intervals. It records effective steps in each manifest. The planned first powered trial is 100 ms at logical PWM 110. Eight isolated coordinator/integration tests passed, and the running Mac dashboard and private bundle were updated.
+
+Two real stationary camera-clock attempts were accepted and immediately aborted with `lease_or_health_lost`; fresh monitor metadata reported Android thermal status 3 (SEVERE) in both. Neither attempt began its timed schedule, and their observer recordings failed on immediate stop, leaving incomplete bundles. Each had only three vision frames within the declared warm-up exclusion, so there are no usable post-warm-up latency distributions or physical onset results. All retained PWM-write witnesses were zero. No powered trial or slalom experiment was run by the coordinator.
+
+A separate 20.049-second read-only observation sampled 378 host status requests and 145 distinct phone statuses, with no sampled disconnects/stale statuses and no increase in application-loss counters. These are status snapshots, not per-packet USB latency measurements. Mac loopback status-API round trip was 1.574 ms median / 3.724 ms p95; this excludes the Pixel and motors. Raw data, both attempts, calculations, endpoint limits and remaining trial plans are indexed in the private `runs/latency-studies/2026-11-18/report.md` and `study.json`. Continue after actual phone cooling and a complete stationary pilot; retain the thermal stop and all freshness gates.
+
+
+## 18 November: final evidence review and 0.7.3 source checkpoint
+
+The [final latency report](autonomy/reports/2026-11-18-final-latency-report.md), companion source-hash inventory and plotted baseline review every supplied export. The 18 November 13:30 export explicitly identifies simulated browser verification; it is excluded from hardware comparison. The two later real attempts have no usable post-warm-up samples. The accepted baseline remains 185.016 ms median image-available → warning draw and 63 ms median input-transition → PWM API write; actual motor onset is unmeasured. No same-endpoint latency reduction is established. USB reply coverage improved from 71/150 to 150/150 in separate 50 Hz bench iterations; that is reliability progress, not an end-to-end speed claim.
+
+The operator subsequently requested that thermal warnings not block timing experiments. MaxBot 0.7.3 source adds an explicit signed trial allowance for SEVERE throttling, independently bounded on Pixel to ≤100 ms powered total, PWM ≤110 and steering ≤10°. CRITICAL heat, faults, deadlines, attendance and manual takeover still stop trials. Slalom is excluded. The default policy remains strict. Android/observer unit checks, both APK builds/lint and the coordinator tests pass. The new Pixel APK is built but not installed or physically validated; the reports remain historical evidence from the earlier app.

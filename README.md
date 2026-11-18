@@ -1,8 +1,10 @@
 # MaxBot 1.0
 
-Current handoff: [implementation status, hardware evidence, measured results and roadmap](docs/PROJECT_STATUS_AND_ROADMAP.md), updated 17 November 2026.
+Current handoff: [implementation status, hardware evidence and roadmap](docs/PROJECT_STATUS_AND_ROADMAP.md), updated 18 November 2026.
 
-[Project status, completed work, hardware evidence and future roadmap](docs/PROJECT_STATUS_AND_ROADMAP.md) — updated 17 November 2026.
+[Final latency review and baseline graph](docs/autonomy/reports/2026-11-18-final-latency-report.md) · [USB experiments, observer and MCP setup](docs/autonomy/usb-experiments.md)
+
+Measured hardware baseline: image availability → Pixel warning draw **185 ms median / 219 ms p95**; Mac input → ESP PWM API write **63 ms median / 130 ms p95**. Physical motor onset is unmeasured. Newer simulated exports and aborted hardware attempts do not demonstrate a comparable latency improvement. The separate disarmed Mac/ESP USB bench verified 150/150 application replies at 49.9 Hz, with 26.1 ms median request/reply time.
 
 Pixel 5 + ESP32 autonomy for a 1:16 four-wheel-drive car with a DC traction motor, TA6586 H-bridge and five-wire potentiometer-feedback steering. The phone runs ARCore localization, cone detection, mapping and 50 Hz pure-pursuit feedback. The Mac supplies the local dashboard and plans the full reference while stopped; model training remains a later task. Original OpenBot documentation: [README.openbot.md](README.openbot.md).
 
@@ -109,7 +111,7 @@ Tracker measurements supplied on 2026-11-12 replace the earlier 168.5 mm wheelba
     "espPort": 4242,
     "dashboardUrl": "",
     "pairingKey": "",
-    "baud": 460800
+    "baud": 921600
   },
   "hardware": {
     "driveForwardPin": 4,
@@ -231,3 +233,5 @@ cd robot/android && ./gradlew :maxbot:assembleDebug :maxbot-core:verifyCore
 Before increasing speed: validate estimated speed/map scale against physical measurements, command-loss stops on both transports, manual override/kill controls and 20 consecutive collision-free correct-order runs. Cone-motion collision suggestions are review candidates; off-camera contact cannot be ruled out.
 
 Software verification in this workspace: debug APK assembly and Android lint; pure Java control tests; generated OSQP/JNI tests including simulated scouting, manual reposition verification and timed slalom; Node HTTP/WebSocket authentication/control tests; dataset/configuration tests; ESP32 3.3.0 builds of both locked and synthetic calibrated branches. Synthetic firmware fixtures are **compile-only and must never be flashed**. No Pixel/car was attached, so live video, VIO quality, physical stopping, detector accuracy and sustained on-device performance still require commissioning. The conservative simulation result is not a real-car performance claim.
+
+USB/shared-Wi-Fi experiments, observer APK and Codex MCP setup: [MaxBot 0.7 guide](docs/autonomy/usb-experiments.md).

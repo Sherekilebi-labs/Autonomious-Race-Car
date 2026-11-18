@@ -52,3 +52,5 @@ jdks
 __pycache__/
 
 /robot/android/maxbot/src/main/assets/maxbot/contracts/
+
+/robot/android/maxbot-observer/build/

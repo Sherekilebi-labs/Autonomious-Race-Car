@@ -1,0 +1,8 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'org.maxbot.observer'
+    compileSdk 36
+    defaultConfig { applicationId 'org.maxbot.observer'; minSdk 30; targetSdk 36; versionCode 3; versionName '0.7.2-rotation-fix' }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies { testImplementation 'junit:junit:4.13.2'; implementation project(':maxbot-core'); implementation 'com.squareup.okhttp3:okhttp:4.9.1' }
